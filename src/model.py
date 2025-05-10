@@ -163,6 +163,10 @@ class FathomnetModel(pl.LightningModule):
 
         if self.hparams.hierarchical_loss:
             self.hierarchical_target = pd.read_csv(self.hparams.hierarchical_label_path, index_col=0)
+            with open(self.hparams.hierachical_labelencoder_path, 'rb') as f:
+                self.hierachical_labelencoder = pickle.load(f)
+            with open(self.hparams.hierachical_tree_path, 'rb') as f:
+                self.hierachical_tree = pickle.load(f)
             self.rank = self.hparams.hierarchical_node_rank
             self.hierarchical_classifier = hierarchical_classifier(in_dim=self.hparams.feature_dim,
                                                  hidden_dim=self.hparams.feature_dim,
@@ -172,23 +176,24 @@ class FathomnetModel(pl.LightningModule):
                                                hidden_dim=self.hparams.feature_dim,
                                                out_dim=self.hparams.feature_dim, dropout=0.2)
 
-        biological_category = pd.read_csv(self.hparams.categories_path, index_col=0)
-        # biotree = BiologicalTree()
-        # for i in range(len(biological_category)):
-        #     single_path = biological_category.iloc[i, :].values
-        #     biotree.add_taxonomy_path(single_path)
+        self.label_distance = pd.read_csv(self.hparams.categories_path, index_col=0)
+
+        # 거리 행렬 생성 (C x C)
+
+        category_names = list(self.hparams.category_name2id.keys())
+        distance_matrix = self.label_distance.loc[category_names, category_names].values  # np.ndarray
+        self.label_distance_tensor = torch.tensor(distance_matrix, dtype=torch.float32)  # to torch.Tensor
 
         with open(self.hparams.centroid_path, 'rb') as f:
             center_embs = pickle.load(f)
-
         self.center_embs = torch.tensor(center_embs).to(args.device)
         self.center_embs = self.center_embs.unsqueeze(0).repeat(self.hparams.batch_size, 1, 1)
         self.center_embs.requires_grad_(False)
+
         self.img_region_encoder.requires_grad_(True)
         self.obj_region_encoder.requires_grad_(True)
-
         self.crossentropy = nn.CrossEntropyLoss()
-        self.biotree = biological_category
+
 
     def configure_optimizers(self):
         optimizer = optim.AdamW(self.parameters(),
@@ -215,7 +220,6 @@ class FathomnetModel(pl.LightningModule):
             error: Classification error rate (float, 0.0 to 1.0)
         """
         loss = self.crossentropy(logits, labels)
-
         with torch.no_grad():
             preds = torch.argmax(logits, dim=1)
             correct = (preds == labels).sum().item()
@@ -246,17 +250,36 @@ class FathomnetModel(pl.LightningModule):
                 self.log(f"{mode}_{level}_acc", acc)
         return loss_list
 
-    def biological_distance(self, logits, target, mode):
-        preds = torch.argmax(logits, dim=1)
-        pred_names = [self.hparams.category_id2name[int(i)] for i in preds.cpu().detach().numpy()]
-        target_names = [self.hparams.category_id2name[int(i)] for i in target.cpu().detach().numpy()]
-        bio_score = [self.biotree.loc[pred_names[i], target_names[i]] for i in range(len(target_names))]
-        # bio_score = [self.biotree.distance(pred_names[i], target_names[i]) for i in range(len(target_names))]
-        mean_bio_score = np.mean(bio_score)
+    def hierarchical_distance(self, logits, target, mode):
+        # 확률화
+        probs = torch.softmax(logits, dim=1)  # (B, C)
+        # target index → distance vector (C,)
+        target_idx = [self.hparams.category_name2id[self.hparams.category_id2name[int(i)]] for i in target.cpu()]
+        target_idx = torch.tensor(target_idx)
+        # 거리 행렬 중에서 target column만 추출 (B, C)
+        distance_targets = self.label_distance_tensor[:, target_idx].T.to(logits.device) # (B, C)
+        # soft expectation: 각 샘플에 대해 확률 * 거리
+        loss_vec = (probs * distance_targets).sum(dim=1)  # (B,)
+        mean_h_score = torch.mean(loss_vec)
         if not self.hparams.disable_logger:
-            self.log(f"{mode}_bio_score", mean_bio_score)
-        return mean_bio_score
+            self.log(f"{mode}_h_score", mean_h_score)
+        return mean_h_score
 
+
+    # def h_distance_loss(self, logits_list, target, mode):
+    #     preds = torch.argmax(logits_list[0], dim=1)
+    #     pred_names = [self.hparams.category_id2name[int(i)] for i in preds.cpu().detach().numpy()]
+    #     target_names = [self.hparams.category_id2name[int(i)] for i in target.cpu().detach().numpy()]
+    #     bio_score = [self.biotree.loc[pred_names[i], target_names[i]] for i in range(len(target_names))]
+    #     # bio_score = [self.biotree.distance(pred_names[i], target_names[i]) for i in range(len(target_names))]
+    #     mean_bio_score = np.mean(bio_score)
+    #     if not self.hparams.disable_logger:
+    #         self.log(f"{mode}_bio_score", mean_bio_score)
+    #     return mean_bio_score
+
+    def on_train_start(self):
+        self.img_region_encoder.train()
+        self.obj_region_encoder.train()
 
     def training_step(self, batch, batch_idx):
         step_mode = 'train'
@@ -280,21 +303,19 @@ class FathomnetModel(pl.LightningModule):
             proj_concat_embs = self.center_embs_proj(self.center_embs)
             inter_env_embs = self.inter_env_attn_module(fused_embdding, proj_concat_embs)
             concat_embs = torch.concat((concat_embs, inter_env_embs), dim=2)
-
         embs = self.concat_proj(concat_embs)
-
-        h_loss = 0
+        sub_h_loss = 0
         if self.hparams.hierarchical_loss:
             hierarchical_logits_list = self.hierarchical_classifier(embs)
             h_loss_list = self.h_crossentropy_loss(hierarchical_logits_list, target, step_mode)
+            # h_d_loss_list = self.h_distance_loss(hierarchical_logits_list, target, step_mode)
             h_loss_arr = torch.stack(h_loss_list)
-            h_loss = torch.mean(h_loss_arr)
+            sub_h_loss = torch.mean(h_loss_arr)
 
         logits = self.classifier(embs).squeeze()
         ce_loss = self.crossentropy_loss(logits, target, step_mode)
-        bio_loss = self.biological_distance(logits, target, step_mode)
-
-        total_loss = ce_loss + self.hparams.lambda_h * h_loss + self.hparams.lambda_bio * bio_loss
+        h_loss = self.hierarchical_distance(logits, target, step_mode)
+        total_loss = ce_loss + self.hparams.lambda_h * h_loss + self.hparams.lambda_sub_h * sub_h_loss
         if not self.hparams.disable_logger:
             self.log(step_mode + "_loss", total_loss.float().mean())
 
@@ -324,18 +345,18 @@ class FathomnetModel(pl.LightningModule):
             concat_embs = torch.concat((concat_embs, inter_env_embs), dim=2)
         embs = self.concat_proj(concat_embs)
 
-        h_loss = 0
+        sub_h_loss = 0
         if self.hparams.hierarchical_loss:
             hierarchical_logits_list = self.hierarchical_classifier(embs)
             h_loss_list = self.h_crossentropy_loss(hierarchical_logits_list, target, step_mode)
+            # h_d_loss_list = self.h_distance_loss(hierarchical_logits_list, target, step_mode)
             h_loss_arr = torch.stack(h_loss_list)
-            h_loss = torch.mean(h_loss_arr)
+            sub_h_loss = torch.mean(h_loss_arr)
 
         logits = self.classifier(embs).squeeze()
         ce_loss = self.crossentropy_loss(logits, target, step_mode)
-        bio_loss = self.biological_distance(logits, target, step_mode)
-
-        total_loss = ce_loss + self.hparams.lambda_h * h_loss + self.hparams.lambda_bio * bio_loss
+        h_loss = self.hierarchical_distance(logits, target, step_mode)
+        total_loss = ce_loss + self.hparams.lambda_h * h_loss + self.hparams.lambda_sub_h * sub_h_loss
         if not self.hparams.disable_logger:
             self.log(step_mode + "_loss", total_loss.float().mean())
 
