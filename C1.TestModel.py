@@ -63,7 +63,7 @@ def load_logger(config):
 
 def get_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default='./config/experiment9.yaml', help='Path to config file')
+    parser.add_argument("--config", type=str, default='./config/experiment12.yaml', help='Path to config file')
     parser.add_argument("--mode", type=str, default=None)
     parser.add_argument("--host", type=str, default=None)
     parser.add_argument("--port", type=str, default=None)
@@ -122,7 +122,7 @@ results = []
 for current_fold in range(n_fold):
 
     model_path = f'~/Project/cvprcom/logs/{config.project_name}/Fold-{current_fold}/last.ckpt'
-    Fathomnet_model = FathomnetModel.load_from_checkpoint(model_path, strict=False).to(device)
+    Fathomnet_model = FathomnetModel.load_from_checkpoint(model_path, strict=False, hierarchical_loss=False).to(device)
     Fathomnet_model.center_embs = Fathomnet_model.center_embs.to(device)
     Fathomnet_model.eval()
 

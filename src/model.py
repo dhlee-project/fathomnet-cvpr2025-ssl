@@ -66,30 +66,20 @@ class classifier(torch.nn.Module):
     def forward(self, x):
         return self.net(x)
 
-class hierachical_classifier(torch.nn.Module):
+class hierarchical_classifier(torch.nn.Module):
 
     def __init__(self, in_dim, hidden_dim, out_dim_list, dropout=0.):
-        super().__init__()
-        self.net_dict = {}
+        super(hierarchical_classifier, self).__init__()
+        self.h_modules = nn.ModuleList([
+            classifier(in_dim, hidden_dim, out_dim, dropout)
+            for out_dim in out_dim_list
+        ])
 
-        for i in range(len(out_dim_list)):
-            self.net_dict[i] = nn.Sequential(
-                nn.Linear(in_dim, hidden_dim),
-                nn.ReLU(),
-                nn.Dropout(dropout),
-                nn.LayerNorm(hidden_dim),
-                nn.Linear(hidden_dim, out_dim_list[i])
-            )
     def forward(self, x):
-        out = {}
-        for k in self.net_dict:
-            out[k] = self.net_dict[k](x)
+        out = []
+        for module in self.h_modules:
+            out.append(module(x))
         return out
-
-
-
-
-
 
 class AttentionLayer(nn.Module):
     def __init__(self, input_dim, embed_dim, num_heads=4, dropout=0.0):
@@ -171,17 +161,16 @@ class FathomnetModel(pl.LightningModule):
                                                    hidden_dim=self.hparams.feature_dim,
                                                    out_dim=self.hparams.feature_dim, dropout=0.2)
 
-        # if self.hparams.hierachical_loss:
-        #     self.hierachical_classifier = hierachical_classifier(in_dim=self.hparams.feature_dim,
-        #                                  hidden_dim=self.hparams.feature_dim,
-        #                                  out_dim_list=self.hparams.nclass_list, dropout=0.2)
-
+        if self.hparams.hierarchical_loss:
+            self.hierarchical_target = pd.read_csv(self.hparams.hierarchical_label_path, index_col=0)
+            self.rank = self.hparams.hierarchical_node_rank
+            self.hierarchical_classifier = hierarchical_classifier(in_dim=self.hparams.feature_dim,
+                                                 hidden_dim=self.hparams.feature_dim,
+                                                 out_dim_list=self.hparams.hierarchical_node_cnt, dropout=0.2)
 
         self.concat_proj = MLP_ProjModel(in_dim=self.hparams.feature_dim*n_concat,
                                                hidden_dim=self.hparams.feature_dim,
                                                out_dim=self.hparams.feature_dim, dropout=0.2)
-
-
 
         biological_category = pd.read_csv(self.hparams.categories_path, index_col=0)
         # biotree = BiologicalTree()
@@ -237,6 +226,26 @@ class FathomnetModel(pl.LightningModule):
             self.log(f"{mode}_acc", acc)
         return loss
 
+    def h_crossentropy_loss(self, hierarchical_logits_list, target, mode):
+        h_target = self.hierarchical_target.loc[target.cpu().numpy(), :]
+        loss_list = []
+        for i in range(len(self.rank)):
+            level = self.rank[i]
+            _level_logit = hierarchical_logits_list[i].squeeze()
+            _level_target = torch.tensor(h_target.loc[:, level].values).to(_level_logit.device)
+            _loss = self.crossentropy(_level_logit, _level_target)
+            loss_list.append(_loss)
+            if not self.hparams.disable_logger:
+                with torch.no_grad():
+                    preds = torch.argmax(_level_logit, dim=1)
+                    correct = (preds == _level_target).sum().item()
+                    total = _level_target.size(0)
+                    acc = (correct / total)
+            # Logging
+
+                self.log(f"{mode}_{level}_acc", acc)
+        return loss_list
+
     def biological_distance(self, logits, target, mode):
         preds = torch.argmax(logits, dim=1)
         pred_names = [self.hparams.category_id2name[int(i)] for i in preds.cpu().detach().numpy()]
@@ -271,14 +280,21 @@ class FathomnetModel(pl.LightningModule):
             proj_concat_embs = self.center_embs_proj(self.center_embs)
             inter_env_embs = self.inter_env_attn_module(fused_embdding, proj_concat_embs)
             concat_embs = torch.concat((concat_embs, inter_env_embs), dim=2)
-        if self.hparams.hierachical_classifier:
-            pass
+
         embs = self.concat_proj(concat_embs)
+
+        h_loss = 0
+        if self.hparams.hierarchical_loss:
+            hierarchical_logits_list = self.hierarchical_classifier(embs)
+            h_loss_list = self.h_crossentropy_loss(hierarchical_logits_list, target, step_mode)
+            h_loss_arr = torch.stack(h_loss_list)
+            h_loss = torch.mean(h_loss_arr)
+
         logits = self.classifier(embs).squeeze()
         ce_loss = self.crossentropy_loss(logits, target, step_mode)
         bio_loss = self.biological_distance(logits, target, step_mode)
 
-        total_loss = ce_loss + self.hparams.lambda_bio * bio_loss
+        total_loss = ce_loss + self.hparams.lambda_h * h_loss + self.hparams.lambda_bio * bio_loss
         if not self.hparams.disable_logger:
             self.log(step_mode + "_loss", total_loss.float().mean())
 
@@ -308,16 +324,18 @@ class FathomnetModel(pl.LightningModule):
             concat_embs = torch.concat((concat_embs, inter_env_embs), dim=2)
         embs = self.concat_proj(concat_embs)
 
-        # if self.hparams.hierachical_loss:
-        #     hierachical_logits = self.hierachical_classifier(embs)
-        #     hloss = self.hierachical_loss(hierachical_logits)
-
+        h_loss = 0
+        if self.hparams.hierarchical_loss:
+            hierarchical_logits_list = self.hierarchical_classifier(embs)
+            h_loss_list = self.h_crossentropy_loss(hierarchical_logits_list, target, step_mode)
+            h_loss_arr = torch.stack(h_loss_list)
+            h_loss = torch.mean(h_loss_arr)
 
         logits = self.classifier(embs).squeeze()
         ce_loss = self.crossentropy_loss(logits, target, step_mode)
         bio_loss = self.biological_distance(logits, target, step_mode)
 
-        total_loss = ce_loss + self.hparams.lambda_bio * bio_loss
+        total_loss = ce_loss + self.hparams.lambda_h * h_loss + self.hparams.lambda_bio * bio_loss
         if not self.hparams.disable_logger:
             self.log(step_mode + "_loss", total_loss.float().mean())
 
