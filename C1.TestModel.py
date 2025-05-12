@@ -63,7 +63,7 @@ def load_logger(config):
 
 def get_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default='./config/experiment14.yaml', help='Path to config file')
+    parser.add_argument("--config", type=str, default='./config/experiment17.yaml', help='Path to config file')
     parser.add_argument("--mode", type=str, default=None)
     parser.add_argument("--host", type=str, default=None)
     parser.add_argument("--port", type=str, default=None)
@@ -165,6 +165,7 @@ for current_fold in range(n_fold):
             if Fathomnet_model.hparams.inter_env_attn:
                 fused_embdding = img_g_embeddings
                 proj_concat_embs = Fathomnet_model.center_embs_proj(Fathomnet_model.center_embs[:img_g_embeddings.shape[0]])
+
                 inter_env_embs = Fathomnet_model.inter_env_attn_module(fused_embdding,
                                                                        proj_concat_embs)
                 concat_embs = torch.concat((concat_embs, inter_env_embs), dim=2)

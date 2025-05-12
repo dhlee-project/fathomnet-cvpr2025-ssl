@@ -97,25 +97,24 @@ for i in range(len_anno):
     anno_data[i]['category_id']  = cate_id
 
 if config.kfold:
-
-    groups = [ann['image_id'] for ann in anno_data]  # 각 annotation에 대한 image_id
-    np.random.seed(777)
-    np.random.shuffle(groups)
-    kf = GroupKFold(n_splits=config.kfold_nsplits)
-    fold_indices = []
-    for fold, (train_idx, val_idx) in enumerate(kf.split(anno_data, groups=groups)):
-        fold_indices.append({
-            'train': train_idx.tolist(),
-            'val': val_idx.tolist()
-        })
-    # data_len = len(anno_data)
-    # kf = KFold(n_splits=config.kfold_nsplits, shuffle=True, random_state=777)  # 재현성을 위한 random_state
+    # groups = [ann['image_id'] for ann in anno_data]  # 각 annotation에 대한 image_id
+    # np.random.seed(777)
+    # np.random.shuffle(groups)
+    # kf = GroupKFold(n_splits=config.kfold_nsplits)
     # fold_indices = []
-    # for fold, (train_index, val_index) in enumerate(kf.split(range(data_len))):
+    # for fold, (train_idx, val_idx) in enumerate(kf.split(anno_data, groups=groups)):
     #     fold_indices.append({
-    #         'train': train_index.tolist(),
-    #         'val': val_index.tolist()
+    #         'train': train_idx.tolist(),
+    #         'val': val_idx.tolist()
     #     })
+    data_len = len(anno_data)
+    kf = KFold(n_splits=config.kfold_nsplits, shuffle=True, random_state=777)  # 재현성을 위한 random_state
+    fold_indices = []
+    for fold, (train_index, val_index) in enumerate(kf.split(range(data_len))):
+        fold_indices.append({
+            'train': train_index.tolist(),
+            'val': val_index.tolist()
+        })
 else:
     fold_indices = []
     data_len = len(anno_data)

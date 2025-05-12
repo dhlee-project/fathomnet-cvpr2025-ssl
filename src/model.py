@@ -165,8 +165,8 @@ class FathomnetModel(pl.LightningModule):
             self.hierarchical_target = pd.read_csv(self.hparams.hierarchical_label_path, index_col=0)
             with open(self.hparams.hierachical_labelencoder_path, 'rb') as f:
                 self.hierachical_labelencoder = pickle.load(f)
-            with open(self.hparams.hierachical_tree_path, 'rb') as f:
-                self.hierachical_tree = pickle.load(f)
+            # with open(self.hparams.hierachical_tree_path, 'rb') as f:
+            #     self.hierachical_tree = pickle.load(f)
             self.rank = self.hparams.hierarchical_node_rank
             self.hierarchical_classifier = hierarchical_classifier(in_dim=self.hparams.feature_dim,
                                                  hidden_dim=self.hparams.feature_dim,
@@ -230,7 +230,7 @@ class FathomnetModel(pl.LightningModule):
             self.log(f"{mode}_acc", acc)
         return loss
 
-    def h_crossentropy_loss(self, hierarchical_logits_list, target, mode):
+    def sub_h_crossentropy_loss(self, hierarchical_logits_list, target, mode):
         h_target = self.hierarchical_target.loc[target.cpu().numpy(), :]
         loss_list = []
         for i in range(len(self.rank)):
@@ -245,8 +245,6 @@ class FathomnetModel(pl.LightningModule):
                     correct = (preds == _level_target).sum().item()
                     total = _level_target.size(0)
                     acc = (correct / total)
-            # Logging
-
                 self.log(f"{mode}_{level}_acc", acc)
         return loss_list
 
@@ -257,7 +255,7 @@ class FathomnetModel(pl.LightningModule):
         target_idx = [self.hparams.category_name2id[self.hparams.category_id2name[int(i)]] for i in target.cpu()]
         target_idx = torch.tensor(target_idx)
         # 거리 행렬 중에서 target column만 추출 (B, C)
-        distance_targets = self.label_distance_tensor[:, target_idx].T.to(logits.device) # (B, C)
+        distance_targets = self.label_distance_tensor[target_idx, : ].to(logits.device) # (B, C)
         # soft expectation: 각 샘플에 대해 확률 * 거리
         loss_vec = (probs * distance_targets).sum(dim=1)  # (B,)
         mean_h_score = torch.mean(loss_vec)
@@ -307,7 +305,7 @@ class FathomnetModel(pl.LightningModule):
         sub_h_loss = 0
         if self.hparams.hierarchical_loss:
             hierarchical_logits_list = self.hierarchical_classifier(embs)
-            h_loss_list = self.h_crossentropy_loss(hierarchical_logits_list, target, step_mode)
+            h_loss_list = self.sub_h_crossentropy_loss(hierarchical_logits_list, target, step_mode)
             # h_d_loss_list = self.h_distance_loss(hierarchical_logits_list, target, step_mode)
             h_loss_arr = torch.stack(h_loss_list)
             sub_h_loss = torch.mean(h_loss_arr)
@@ -315,7 +313,7 @@ class FathomnetModel(pl.LightningModule):
         logits = self.classifier(embs).squeeze()
         ce_loss = self.crossentropy_loss(logits, target, step_mode)
         h_loss = self.hierarchical_distance(logits, target, step_mode)
-        total_loss = ce_loss + self.hparams.lambda_h * h_loss + self.hparams.lambda_sub_h * sub_h_loss
+        total_loss =  self.hparams.lambda_ce * ce_loss + self.hparams.lambda_h * h_loss + self.hparams.lambda_sub_h * sub_h_loss
         if not self.hparams.disable_logger:
             self.log(step_mode + "_loss", total_loss.float().mean())
 
@@ -348,7 +346,7 @@ class FathomnetModel(pl.LightningModule):
         sub_h_loss = 0
         if self.hparams.hierarchical_loss:
             hierarchical_logits_list = self.hierarchical_classifier(embs)
-            h_loss_list = self.h_crossentropy_loss(hierarchical_logits_list, target, step_mode)
+            h_loss_list = self.sub_h_crossentropy_loss(hierarchical_logits_list, target, step_mode)
             # h_d_loss_list = self.h_distance_loss(hierarchical_logits_list, target, step_mode)
             h_loss_arr = torch.stack(h_loss_list)
             sub_h_loss = torch.mean(h_loss_arr)
@@ -356,7 +354,7 @@ class FathomnetModel(pl.LightningModule):
         logits = self.classifier(embs).squeeze()
         ce_loss = self.crossentropy_loss(logits, target, step_mode)
         h_loss = self.hierarchical_distance(logits, target, step_mode)
-        total_loss = ce_loss + self.hparams.lambda_h * h_loss + self.hparams.lambda_sub_h * sub_h_loss
+        total_loss = self.hparams.lambda_ce * ce_loss + self.hparams.lambda_h * h_loss + self.hparams.lambda_sub_h * sub_h_loss
         if not self.hparams.disable_logger:
             self.log(step_mode + "_loss", total_loss.float().mean())
 
