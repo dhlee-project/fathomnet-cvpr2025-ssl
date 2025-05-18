@@ -8,7 +8,7 @@ from torchvision.transforms import InterpolationMode
 from torchvision import transforms
 import matplotlib.pyplot as plt
 import numpy as np
-
+import random
 
 def pad_to_square(img, pad_value=0):
     h, w = img.shape[:2]
@@ -46,7 +46,36 @@ class Fathomnet_Dataset(Dataset):
         self.img_enc_processor = AutoImageProcessor.from_pretrained(args.img_encoder_path)  # 앞으로 빼기
         self.img_enc_processor.size['shortest_edge'] = args.img_encoder_size[0]
         self.img_enc_processor.do_center_crop = False
+
+        self.colorjitter_aug = transforms.Compose([
+            # transforms.RandomResizedCrop(size=args.img_encoder_size, scale=(0.9, 1.0), ratio=(0.9, 1.1)),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomVerticalFlip(),
+            transforms.RandomApply([
+                transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.1)
+            ], p=0.99),
+            transforms.RandomRotation(degrees=15, interpolation=InterpolationMode.BILINEAR, expand=False),
+            # transforms.RandomGrayscale(p=0.1),
+            # transforms.GaussianBlur(kernel_size=(1, 5), sigma=(0.01, 5)),
+            # transforms.ToTensor(),
+            # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+
+        self.resize = transforms.Resize((18, 18),
+                                   interpolation=InterpolationMode.NEAREST_EXACT,
+                                   antialias=True)
+
         self.args = args
+
+        if self.phase == 'train' or self.phase == 'valid':
+            self.cate_img_dict = {}
+            for k in range(len(self.annodata)):
+                _dat = self.annodata[k]
+                _img_id = _dat['image_id']
+                _cate_id = _dat['category_id']
+                if _cate_id not in self.cate_img_dict.keys():
+                    self.cate_img_dict[_cate_id] = []
+                self.cate_img_dict[_cate_id].append(_img_id)
 
     def __len__(self):
         return len(self.annodata)
@@ -59,29 +88,62 @@ class Fathomnet_Dataset(Dataset):
 
         if self.phase == 'train' or self.phase == 'valid':
             image_path = os.path.join('./dataset/fathomnet-2025/train_data/images',str(img_id)+'.png')
+            mask_path = os.path.join('./dataset/fathomnet-2025/train_data/masks',str(img_id)+'.npy')
+            img_mask = torch.tensor(np.load(mask_path))[None,:,:]
+            img_mask = self.resize(img_mask)
         else:
             image_path = os.path.join('./dataset/fathomnet-2025/test_data/images',str(img_id)+'.png')
+            img_mask = 0
 
-        image = Image.open(image_path)
+        if self.args.imgxaug:
+            env_img_id = random.choice(self.cate_img_dict[category_id])
+            env_image_path = os.path.join('./dataset/fathomnet-2025/train_data/images', str(env_img_id) + '.png')
+
+            image = Image.open(image_path)
+            env_image = Image.open(env_image_path)
+        else:
+            image = Image.open(image_path)
+            env_image = image
+
         if image.mode == 'L':
             image = image.convert('RGB')
-        self.args.object_crop = 'square'
+        img_w, img_h = image.size
         init_x, init_y, w, h = bbox
         center_x = int(init_x + w // 2)
         center_y = int(init_y + h // 2)
+
+        if self.phase == 'train' and self.args.transform:
+            object_crop = random.choice(['narrow', 'padding', 'square'])
+            self.args.object_crop = object_crop
+
         if self.args.object_crop == 'narrow':
-            obj_img = np.array(image)[int(init_y):int(init_y + h), int(init_x):int(init_x + w), :]
+            y1 = max(int(init_y) - 1, 0)
+            y2 = min(int(init_y + h + 1), img_h)
+            x1 = max(int(init_x) - 1, 0)
+            x2 = min(int(init_x + w + 1), img_w)
+            obj_img = np.array(image)[y1:y2, x1:x2, :]
         elif self.args.object_crop == 'padding':
-            obj_img = np.array(image)[int(init_y):int(init_y + h), int(init_x):int(init_x + w), :]
+            y1 = max(int(init_y) - 1, 0)
+            y2 = min(int(init_y + h + 1), img_h)
+            x1 = max(int(init_x) - 1, 0)
+            x2 = min(int(init_x + w + 1), img_w)
+            obj_img = np.array(image)[y1:y2, x1:x2, :]
             obj_img = pad_to_square(obj_img, pad_value=0)
         elif self.args.object_crop == 'square':
             norm_half_size = max(w, h) // 2
-            obj_img = np.array(image)[int(center_y - norm_half_size):int(center_y + norm_half_size),
-                      int(center_x - norm_half_size):int(center_x + norm_half_size), :]
-        obj_img = Image.fromarray(obj_img)
+            y1 = max(int(center_y - norm_half_size - 1), 0)
+            y2 = min(int(center_y + norm_half_size + 1), img_h)
+            x1 = max(int(center_x - norm_half_size - 1), 0)
+            x2 = min(int(center_x + norm_half_size + 1), img_w)
+            obj_img = np.array(image)[y1:y2, x1:x2, :]
+
+        if self.phase == 'train'  and self.args.transform:
+            obj_img = self.colorjitter_aug(Image.fromarray(obj_img))
+        else:
+            obj_img = Image.fromarray(obj_img)
 
         obj_processed_img = (self.obj_enc_processor(images=obj_img.resize(self.args.obj_encoder_size),return_tensors="pt").pixel_values).squeeze(dim=0)  ###224
-        img_processed_img = (self.img_enc_processor(images=image.resize(self.args.img_encoder_size),return_tensors="pt").pixel_values).squeeze(dim=0)
+        img_processed_img = (self.img_enc_processor(images=env_image.resize(self.args.img_encoder_size),return_tensors="pt").pixel_values).squeeze(dim=0)
 
         if str(category_id) == 'None':
             category_id = -1
@@ -92,6 +154,7 @@ class Fathomnet_Dataset(Dataset):
         return {
             "obj_processed_img": obj_processed_img,
             "global_processed_img": img_processed_img,
+            "obj_mask" : img_mask,
             "target" : target,
             "obj_anno": anno
         }

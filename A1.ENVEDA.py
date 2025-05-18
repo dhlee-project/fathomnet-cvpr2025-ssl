@@ -132,14 +132,14 @@ anno_path = './dataset/fathomnet-2025/train_data/annotations.csv'
 anno_data = pd.read_csv(anno_path)
 
 # load dataset
-load_embs = True
+load_embs = False
 if load_embs:
     with open('./results/global_image_data.pkl', 'rb') as f:
         global_image_data = pickle.load(f)
     g_id_arr = global_image_data['ids']
     g_embs_arr = global_image_data['embs']
 else:
-    img_region_encoder = AutoModel.from_pretrained('facebook/dinov2-base').cuda().eval()
+    img_region_encoder = AutoModel.from_pretrained('facebook/dinov2-large').cuda().eval()
     img_list = glob.glob(f'./dataset/fathomnet-2025/train_data/images/*.png')
     image_length = len(img_list)
     dataset = EDADataset(img_list)
@@ -151,7 +151,7 @@ else:
         drop_last=False,
         pin_memory=True)
     g_embs_list = []; i =0
-    g_embs_arr = torch.zeros((image_length,768))
+    g_embs_arr = torch.zeros((image_length, 1024))
     g_id_arr = np.zeros((image_length)).astype(object)
     with torch.no_grad():
         for batch in dataloader:
@@ -168,7 +168,7 @@ else:
     g_embs_arr = g_embs_arr.numpy()
     g_id_arr = g_id_arr
     global_image_data = {'embs' : g_embs_arr, 'ids': g_id_arr}
-    with open('./results/global_image_data.pkl', 'wb') as f:
+    with open('./results/global_image_1024_data.pkl', 'wb') as f:
         pickle.dump(global_image_data, f)
 
 
@@ -195,7 +195,7 @@ plt.tight_layout()
 plt.show()
 
 ### kmeans  - tsne
-n_clusters = 256  # Set number of clusters
+n_clusters = 512  # Set number of clusters
 kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init='auto')
 kmeans.fit(X)
 
@@ -222,8 +222,8 @@ plt.grid(True)
 plt.tight_layout()
 plt.show()
 
-# with open('./results/centroid_embs_256.pkl', 'wb') as f:
-#     pickle.dump(centers, f)
+with open('./results/centroid_1024_embs_512.pkl', 'wb') as f:
+    pickle.dump(centers, f)
 
 # X: 원본 데이터 (N, D), dtype=float32
 # 차원 축소 (예: 2D 또는 10D)

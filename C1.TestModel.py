@@ -63,7 +63,7 @@ def load_logger(config):
 
 def get_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default='./config/experiment17.yaml', help='Path to config file')
+    parser.add_argument("--config", type=str, default='./config/experiment25_15.yaml', help='Path to config file')
     parser.add_argument("--mode", type=str, default=None)
     parser.add_argument("--host", type=str, default=None)
     parser.add_argument("--port", type=str, default=None)
@@ -73,14 +73,16 @@ args = get_parser()
 config = OmegaConf.load(args.config)
 pl.seed_everything(config.seed_number)
 init_random_seed(config.seed_number)
-config.kfold = True
-batchsize = 16
+config.kfold = False
+config.transform = False
+config.imgxaug = False
+config.kfold_nsplits = 1
+batchsize = 2
 device = 'cuda'
 test_anno_path = './dataset/fathomnet-2025/dataset_test.json'
 with open(test_anno_path, 'r', encoding='utf-8') as f:
     dataset = json.load(f)
 anno_data = dataset['annotations']
-
 len_cate = len(dataset['categories'])
 cate_name2id = {}
 cate_id2name = {}
@@ -93,22 +95,6 @@ for i in range(len_cate):
 config.category_name2id = cate_name2id
 config.category_id2name = cate_id2name
 
-# if config.kfold:
-#     data_len = len(anno_data)
-#     kf = KFold(n_splits=config.kfold_nsplits, shuffle=True, random_state=777)  # 재현성을 위한 random_state
-#     fold_indices = []
-#     for train_index, val_index in kf.split(range(data_len)):
-#         fold_indices.append({
-#             'train': train_index.tolist(),
-#             'val': val_index.tolist()
-#         })
-# else:
-#     fold_indices = []
-#     data_len = len(anno_data)
-#     sampled_val = np.random.choice(list(range(data_len)), 100).tolist()
-#     fold_indices.append({'train' : list(range(data_len)),
-#                          'val': sampled_val})
-
 fold_indices = []
 data_len = len(anno_data)
 sampled_val = np.random.choice(list(range(data_len)), 100).tolist()
@@ -116,13 +102,12 @@ fold_indices.append({'train' : list(range(data_len)[:]),
                      'val': sampled_val})
 
 print('Run Testing')
-n_fold = config.kfold_nsplits
 config.current_fold = 0
 results = []
+n_fold = config.kfold_nsplits
 for current_fold in range(n_fold):
-
     model_path = f'~/Project/cvprcom/logs/{config.project_name}/Fold-{current_fold}/last.ckpt'
-    Fathomnet_model = FathomnetModel.load_from_checkpoint(model_path, strict=False, hierarchical_loss=False).to(device)
+    Fathomnet_model = FathomnetModel.load_from_checkpoint(model_path).to(device)
     Fathomnet_model.center_embs = Fathomnet_model.center_embs.to(device)
     Fathomnet_model.eval()
 
@@ -164,10 +149,13 @@ for current_fold in range(n_fold):
                 concat_embs = torch.concat((concat_embs, intra_env_embs), dim=2)
             if Fathomnet_model.hparams.inter_env_attn:
                 fused_embdding = img_g_embeddings
-                proj_concat_embs = Fathomnet_model.center_embs_proj(Fathomnet_model.center_embs[:img_g_embeddings.shape[0]])
-
-                inter_env_embs = Fathomnet_model.inter_env_attn_module(fused_embdding,
-                                                                       proj_concat_embs)
+                proj_concat_embs = Fathomnet_model.center_embs_proj(Fathomnet_model.center_embs[:obj_embeddings.shape[0]])
+                inter_env_embs = Fathomnet_model.inter_env_attn_module(
+                                                                       fused_embdding, proj_concat_embs
+                                                                       )
+                # centroid_cls_token = Fathomnet_model.centroid_cls_token.repeat(obj_embeddings.shape[0], 1, 1)
+                # inter_env_embs = torch.cat([inter_env_embs, intra_env_embs], dim=1)
+                # inter_env_embs = Fathomnet_model.centroid_attn_module(centroid_cls_token, inter_env_embs)
                 concat_embs = torch.concat((concat_embs, inter_env_embs), dim=2)
 
             embs = Fathomnet_model.concat_proj(concat_embs)
@@ -180,11 +168,11 @@ for current_fold in range(n_fold):
 
 submission = pd.DataFrame(results)
 submission.columns = ['fold', 'annotation_id', 'concept_name']
-submission.to_csv(f"./results/submission_allfold_{config.project_name}_0509_01.csv", index=False)
+# submission.to_csv(f"./results/submission_allfold_{config.project_name}_0513_02.csv", index=False)
 submission = submission[['annotation_id', 'concept_name']]
 voted_submission = (
     submission.groupby(['annotation_id'])['concept_name']
     .agg(lambda x: x.mode().iloc[0])  # 최빈값 (복수일 경우 첫 번째 선택)
     .reset_index()
 )
-voted_submission.to_csv(f"./results/submission_{config.project_name}_0509_02.csv", index=False)
+voted_submission.to_csv(f"./results/submission_{config.project_name}_0514_01.csv", index=False)
