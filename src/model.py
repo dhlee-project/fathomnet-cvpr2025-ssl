@@ -295,18 +295,6 @@ class FathomnetModel(pl.LightningModule):
             self.log(f"{mode}_h_score", mean_h_score)
         return mean_h_score
 
-
-    # def h_distance_loss(self, logits_list, target, mode):
-    #     preds = torch.argmax(logits_list[0], dim=1)
-    #     pred_names = [self.hparams.category_id2name[int(i)] for i in preds.cpu().detach().numpy()]
-    #     target_names = [self.hparams.category_id2name[int(i)] for i in target.cpu().detach().numpy()]
-    #     bio_score = [self.biotree.loc[pred_names[i], target_names[i]] for i in range(len(target_names))]
-    #     # bio_score = [self.biotree.distance(pred_names[i], target_names[i]) for i in range(len(target_names))]
-    #     mean_bio_score = np.mean(bio_score)
-    #     if not self.hparams.disable_logger:
-    #         self.log(f"{mode}_bio_score", mean_bio_score)
-    #     return mean_bio_score
-
     def training_step(self, batch, batch_idx):
         step_mode = 'train'
         obj_processed_imgs = batch['obj_processed_img']
