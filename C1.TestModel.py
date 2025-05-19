@@ -63,7 +63,7 @@ def load_logger(config):
 
 def get_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default='./config/experiment25_15.yaml', help='Path to config file')
+    parser.add_argument("--config", type=str, default='./config/experiment29.yaml', help='Path to config file')
     parser.add_argument("--mode", type=str, default=None)
     parser.add_argument("--host", type=str, default=None)
     parser.add_argument("--port", type=str, default=None)
@@ -136,27 +136,31 @@ for current_fold in range(n_fold):
             target = batch['target']
             obj_anno = batch['obj_anno']
 
-            obj_enc_out = Fathomnet_model.obj_region_encoder(obj_processed_imgs)
-            img_enc_out = Fathomnet_model.img_region_encoder(global_processed_imgs)
+            batch_size, _, _, _ = obj_processed_imgs.shape
+            obj_vit_enc_out = Fathomnet_model.obj_vit_region_encoder(obj_processed_imgs)
+            img_vit_enc_out = Fathomnet_model.img_vit_region_encoder(global_processed_imgs)
 
-            obj_embeddings = obj_enc_out.last_hidden_state[:, :1, :]
-            img_g_embeddings = img_enc_out.last_hidden_state[:, :1, :]
-            img_p_embeddings = img_enc_out.last_hidden_state[:, 1:, :]
-            concat_embs = obj_embeddings
+            obj_vit_embeddings = obj_vit_enc_out.last_hidden_state[:, :1, :]
+            img_vit_g_embeddings = img_vit_enc_out.last_hidden_state[:, :1, :]
+            img_vit_p_embeddings = img_vit_enc_out.last_hidden_state[:, 1:, :]
+            concat_embs = obj_vit_embeddings.view(obj_vit_embeddings.shape[0], -1)
             if Fathomnet_model.hparams.intra_env_attn:
-                intra_env_embs = Fathomnet_model.intra_env_attn_module(obj_embeddings,
-                                                                       img_p_embeddings)
-                concat_embs = torch.concat((concat_embs, intra_env_embs), dim=2)
+                intra_env_embs = Fathomnet_model.intra_env_attn_module(obj_vit_embeddings,
+                                                                       img_vit_p_embeddings).view(batch_size, -1)
+                concat_embs = torch.concat((concat_embs, intra_env_embs), dim=-1)
             if Fathomnet_model.hparams.inter_env_attn:
-                fused_embdding = img_g_embeddings
-                proj_concat_embs = Fathomnet_model.center_embs_proj(Fathomnet_model.center_embs[:obj_embeddings.shape[0]])
+                fused_embdding = img_vit_g_embeddings
+                proj_concat_embs = Fathomnet_model.center_embs_proj(Fathomnet_model.center_embs[:batch_size])
                 inter_env_embs = Fathomnet_model.inter_env_attn_module(
                                                                        fused_embdding, proj_concat_embs
-                                                                       )
-                # centroid_cls_token = Fathomnet_model.centroid_cls_token.repeat(obj_embeddings.shape[0], 1, 1)
-                # inter_env_embs = torch.cat([inter_env_embs, intra_env_embs], dim=1)
-                # inter_env_embs = Fathomnet_model.centroid_attn_module(centroid_cls_token, inter_env_embs)
-                concat_embs = torch.concat((concat_embs, inter_env_embs), dim=2)
+                                                                       ).view(obj_vit_embeddings.shape[0], -1)
+                concat_embs = torch.concat((concat_embs, inter_env_embs), dim=-1)
+
+            if Fathomnet_model.hparams.obj_cnn_feature:
+                obj_cnn_enc_out = Fathomnet_model.obj_cnn_region_encoder(obj_processed_imgs)
+                obj_cnn_enc_out = obj_cnn_enc_out.pooler_output.view(batch_size, -1)
+                proj_obj_cnn_enc = Fathomnet_model.cnn_embs_proj(obj_cnn_enc_out)
+                concat_embs = torch.concat((concat_embs, proj_obj_cnn_enc), dim=-1)
 
             embs = Fathomnet_model.concat_proj(concat_embs)
             logits = Fathomnet_model.classifier(embs).squeeze()
