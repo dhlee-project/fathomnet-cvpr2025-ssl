@@ -161,9 +161,9 @@ class FathomnetModel(pl.LightningModule):
         n_concat = 1
         if self.hparams.intra_env_attn:
             self.intra_env_attn_module = nn.ModuleDict()
-            n_concat += 1
+            # n_concat += 1
             for scales in self.hparams.img_encoder_size:
-                # n_concat += 1
+                n_concat += 1
                 self.intra_env_attn_module[str(scales[0])] = MultiLayerAttentionModel(query_dim=self.hparams.feature_dim,
                                                                            embed_dim=self.hparams.feature_dim,
                                                                            num_heads=4,
@@ -336,8 +336,8 @@ class FathomnetModel(pl.LightningModule):
             intra_env_embs_dcit = {}
             for scales in self.hparams.img_encoder_size:
                 intra_env_embs_dcit[scales[0]] = self.intra_env_attn_module[str(scales[0])](obj_vit_embeddings, img_vit_p_embeddings[scales[0]]).view(batch_size, -1)
-            # intra_env_embs = torch.concat(list(intra_env_embs_dcit.values()), 1)
-            intra_env_embs = torch.stack(list(intra_env_embs_dcit.values())).mean(0)
+            intra_env_embs = torch.concat(list(intra_env_embs_dcit.values()), 1)
+            # intra_env_embs = torch.stack(list(intra_env_embs_dcit.values())).mean(0)
             concat_embs = torch.concat((concat_embs, intra_env_embs), dim=-1)
 
         if self.hparams.inter_env_attn:

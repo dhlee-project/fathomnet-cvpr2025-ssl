@@ -143,6 +143,12 @@ class Fathomnet_Dataset(Dataset):
 
 
         if self.phase == 'train'  and self.args.transform:
+            # oh, ow, oc = obj_img.shape
+            # if random.random() > 0.9 and (oh > 10 and ow > 10):
+            #     resize_factor = random.uniform(0.1, 0.9)
+            #     new_width = int(obj_img.shape[1] * resize_factor)
+            #     new_height = int(obj_img.shape[0] * resize_factor)
+            #     obj_img = cv2.resize(obj_img, (new_width, new_height), interpolation=cv2.INTER_AREA)
             obj_img = self.colorjitter_aug(Image.fromarray(obj_img))
             env_image = self.colorjitter_aug(env_image)
         else:
