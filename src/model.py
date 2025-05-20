@@ -148,32 +148,38 @@ class FathomnetModel(pl.LightningModule):
         self.save_hyperparameters(args)
 
         # assert self.hparams.temperature > 0.0, "The temperature must be a positive float!"
-        self.img_vit_region_encoder = AutoModel.from_pretrained(self.hparams.img_vit_encoder_path)
+        self.img_vit_region_encoders = nn.ModuleDict()
+        for scales in self.hparams.img_encoder_size:
+            self.img_vit_region_encoders[str(scales[0])] = AutoModel.from_pretrained(self.hparams.img_vit_encoder_path)
+
         self.obj_vit_region_encoder  = AutoModel.from_pretrained(self.hparams.obj_vit_encoder_path)
+
         self.classifier = classifier(in_dim=self.hparams.feature_dim,
                                                hidden_dim=self.hparams.feature_dim,
                                                out_dim=self.hparams.nclass, dropout=0.2)
 
         n_concat = 1
         if self.hparams.intra_env_attn:
-            n_concat += 1
-            self.intra_env_attn_module = MultiLayerAttentionModel(query_dim=self.hparams.feature_dim,
-                                                                       embed_dim=self.hparams.feature_dim,
-                                                                       num_heads=4,
-                                                                       num_blocks=3,
-                                                                       dropout=0.2)
+            self.intra_env_attn_module = nn.ModuleDict()
+            for scales in self.hparams.img_encoder_size:
+                n_concat += 1
+                self.intra_env_attn_module[str(scales[0])] = MultiLayerAttentionModel(query_dim=self.hparams.feature_dim,
+                                                                           embed_dim=self.hparams.feature_dim,
+                                                                           num_heads=4,
+                                                                           num_blocks=3,
+                                                                           dropout=0.2).cuda()
         if self.hparams.obj_cnn_feature:
             n_concat += 1
             self.obj_cnn_region_encoder = AutoModel.from_pretrained(self.hparams.obj_cnn_encoder_path)
             self.cnn_embs_proj = MLP_ProjModel(in_dim=2048,
                                                    hidden_dim=self.hparams.feature_dim,
-                                                   out_dim=self.hparams.feature_dim, dropout=0.4)
+                                                   out_dim=self.hparams.feature_dim, dropout=0.2)
 
         if self.hparams.inter_env_attn:
             n_concat += 1
             self.center_embs_proj = MLP_ProjModel(in_dim=self.hparams.feature_dim,
                                                    hidden_dim=self.hparams.feature_dim,
-                                                   out_dim=self.hparams.feature_dim, dropout=0.4)
+                                                   out_dim=self.hparams.feature_dim, dropout=0.2)
 
             self.gate_module = GATE_MLP_ProjModel(in_dim=self.hparams.feature_dim,
                                                    hidden_dim=self.hparams.feature_dim,
@@ -225,8 +231,8 @@ class FathomnetModel(pl.LightningModule):
         self.center_embs = self.center_embs.unsqueeze(0).repeat(self.hparams.batch_size, 1, 1)
         self.center_embs.requires_grad_(False)
 
-        self.img_vit_region_encoder.requires_grad_(True)
-        self.obj_vit_region_encoder .requires_grad_(True)
+        # self.img_vit_region_encoder.requires_grad_(True)
+        # self.obj_vit_region_encoder .requires_grad_(True)
         self.crossentropy = nn.CrossEntropyLoss()
 
 
@@ -302,37 +308,42 @@ class FathomnetModel(pl.LightningModule):
     def run_step(self, batch, step_mode):
 
         obj_processed_imgs = batch['obj_processed_img']
-        global_processed_imgs = batch['global_processed_img']
-        obj_masks = batch['obj_mask']
+
+        global_processed_imgs = {}
+        for scales in self.hparams.img_encoder_size:
+            scale = scales[0]
+            global_processed_imgs[scale] = batch[f'global_processed_img{scale}']
+
+        # obj_masks = batch['obj_mask']
         target = batch['target']
 
         obj_vit_enc_out = self.obj_vit_region_encoder(obj_processed_imgs)
-        img_vit_enc_out = self.img_vit_region_encoder(global_processed_imgs)
-
         obj_vit_embeddings = obj_vit_enc_out.last_hidden_state[:, :1, :]
-        img_vit_g_embeddings = img_vit_enc_out.last_hidden_state[:, :1, :]
-        img_vit_p_embeddings = img_vit_enc_out.last_hidden_state[:, 1:, :]
 
-        batch_size, patch_size, _ = img_vit_p_embeddings.shape
-        flattend_obj_masks = obj_masks.reshape(batch_size, -1)
+        img_vit_g_embeddings = {}
+        img_vit_p_embeddings = {}
+        for scales in self.hparams.img_encoder_size:
+            img_vit_enc_out = self.img_vit_region_encoders[str(scales[0])](global_processed_imgs[scales[0]])
+            img_vit_g_embeddings[scales[0]] = img_vit_enc_out.last_hidden_state[:, :1, :]
+            img_vit_p_embeddings[scales[0]] = img_vit_enc_out.last_hidden_state[:, 1:, :]
+
+        batch_size, _, _ = obj_vit_embeddings.shape
+        # flattend_obj_masks = obj_masks.reshape(batch_size, -1)
 
         concat_embs = obj_vit_embeddings.view(batch_size, -1)
         if self.hparams.intra_env_attn:
-            intra_env_embs = self.intra_env_attn_module(obj_vit_embeddings, img_vit_p_embeddings).view(batch_size, -1)
+            intra_env_embs_dcit = {}
+            for scales in self.hparams.img_encoder_size:
+                intra_env_embs_dcit[scales[0]] = self.intra_env_attn_module[str(scales[0])](obj_vit_embeddings, img_vit_p_embeddings[scales[0]]).view(batch_size, -1)
+            intra_env_embs = torch.concat(list(intra_env_embs_dcit.values()), 1)
             concat_embs = torch.concat((concat_embs, intra_env_embs), dim=-1)
+
         if self.hparams.inter_env_attn:
-            fused_embdding = img_vit_g_embeddings
-            # alpha = self.gate_module(obj_embeddings)
-            proj_concat_embs = self.center_embs_proj(self.center_embs)
-            inter_env_embs = self.inter_env_attn_module(fused_embdding, proj_concat_embs)
-            # inter_env_embs = obj_embeddings + alpha * inter_env_embs
-            concat_embs = torch.concat((concat_embs, inter_env_embs), dim=-1)
+            pass
 
         if self.hparams.obj_cnn_feature:
-            obj_cnn_enc_out = self.obj_cnn_region_encoder(obj_processed_imgs)
-            obj_cnn_enc_out = obj_cnn_enc_out.pooler_output.view(batch_size, -1)
-            proj_obj_cnn_enc = self.cnn_embs_proj(obj_cnn_enc_out)
-            concat_embs = torch.concat((concat_embs, proj_obj_cnn_enc), dim=-1)
+            pass
+
 
         embs = self.concat_proj(concat_embs)
 
@@ -340,14 +351,11 @@ class FathomnetModel(pl.LightningModule):
         if self.hparams.hierarchical_loss:
             hierarchical_logits_list = self.hierarchical_classifier(embs)
             h_loss_list = self.sub_h_crossentropy_loss(hierarchical_logits_list, target, step_mode)
-            # h_d_loss_list = self.h_distance_loss(hierarchical_logits_list, target, step_mode)
             h_loss_arr = torch.stack(h_loss_list)
             sub_h_loss = torch.mean(h_loss_arr)
         p_ce_loss = 0
         if self.hparams.patch_loss:
-            p_logit = self.patch_classifier(img_vit_p_embeddings)
-            p_ce_loss = self.crossentropy_loss(p_logit.reshape(-1, 80), flattend_obj_masks.reshape(-1).to(int),
-                                               'p_class', step_mode)
+            pass
 
         logits = self.classifier(embs).squeeze()
         ce_loss = self.crossentropy_loss(logits, target, 'class', step_mode)

@@ -63,7 +63,7 @@ def load_logger(config):
 
 def get_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default='./config/experiment29.yaml', help='Path to config file')
+    parser.add_argument("--config", type=str, default='./config/experiment39.yaml', help='Path to config file')
     parser.add_argument("--mode", type=str, default=None)
     parser.add_argument("--host", type=str, default=None)
     parser.add_argument("--port", type=str, default=None)
@@ -108,7 +108,6 @@ n_fold = config.kfold_nsplits
 for current_fold in range(n_fold):
     model_path = f'~/Project/cvprcom/logs/{config.project_name}/Fold-{current_fold}/last.ckpt'
     Fathomnet_model = FathomnetModel.load_from_checkpoint(model_path).to(device)
-    Fathomnet_model.center_embs = Fathomnet_model.center_embs.to(device)
     Fathomnet_model.eval()
 
     config.current_fold = current_fold
@@ -132,21 +131,32 @@ for current_fold in range(n_fold):
         for batch in tqdm.tqdm(test_dataloader):
             # print(volume_images.shape, seg_images.shape)  # e.g., [1, H, W, D]
             obj_processed_imgs = batch['obj_processed_img'].to(device)
-            global_processed_imgs = batch['global_processed_img'].to(device)
+            # global_processed_imgs = batch['global_processed_img'].to(device)
             target = batch['target']
             obj_anno = batch['obj_anno']
 
+            global_processed_imgs = {}
+            for scales in Fathomnet_model.hparams.img_encoder_size:
+                scale = scales[0]
+                global_processed_imgs[scale] = batch[f'global_processed_img{scale}'].to(device)
+
             batch_size, _, _, _ = obj_processed_imgs.shape
             obj_vit_enc_out = Fathomnet_model.obj_vit_region_encoder(obj_processed_imgs)
-            img_vit_enc_out = Fathomnet_model.img_vit_region_encoder(global_processed_imgs)
-
             obj_vit_embeddings = obj_vit_enc_out.last_hidden_state[:, :1, :]
-            img_vit_g_embeddings = img_vit_enc_out.last_hidden_state[:, :1, :]
-            img_vit_p_embeddings = img_vit_enc_out.last_hidden_state[:, 1:, :]
+
+            img_vit_g_embeddings = {}
+            img_vit_p_embeddings = {}
+            for scales in Fathomnet_model.hparams.img_encoder_size:
+                img_vit_enc_out = Fathomnet_model.img_vit_region_encoders[str(scales[0])](global_processed_imgs[scales[0]])
+                img_vit_g_embeddings[scales[0]] = img_vit_enc_out.last_hidden_state[:, :1, :]
+                img_vit_p_embeddings[scales[0]] = img_vit_enc_out.last_hidden_state[:, 1:, :]
+
             concat_embs = obj_vit_embeddings.view(obj_vit_embeddings.shape[0], -1)
             if Fathomnet_model.hparams.intra_env_attn:
-                intra_env_embs = Fathomnet_model.intra_env_attn_module(obj_vit_embeddings,
-                                                                       img_vit_p_embeddings).view(batch_size, -1)
+                intra_env_embs_dcit = {}
+                for scales in Fathomnet_model.hparams.img_encoder_size:
+                    intra_env_embs_dcit[scales[0]] = Fathomnet_model.intra_env_attn_module[str(scales[0])](obj_vit_embeddings, img_vit_p_embeddings[scales[0]]).view(batch_size, -1)
+                intra_env_embs = torch.concat(list(intra_env_embs_dcit.values()), -1)
                 concat_embs = torch.concat((concat_embs, intra_env_embs), dim=-1)
             if Fathomnet_model.hparams.inter_env_attn:
                 fused_embdding = img_vit_g_embeddings
@@ -179,4 +189,4 @@ voted_submission = (
     .agg(lambda x: x.mode().iloc[0])  # 최빈값 (복수일 경우 첫 번째 선택)
     .reset_index()
 )
-voted_submission.to_csv(f"./results/submission_{config.project_name}_0514_01.csv", index=False)
+voted_submission.to_csv(f"./results/submission_{config.project_name}_0519_01.csv", index=False)

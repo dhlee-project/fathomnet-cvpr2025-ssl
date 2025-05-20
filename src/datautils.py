@@ -44,9 +44,12 @@ class Fathomnet_Dataset(Dataset):
         self.obj_enc_processor.size['shortest_edge'] = args.obj_encoder_size[0]
         self.obj_enc_processor.do_center_crop = False
 
-        self.img_enc_processor = AutoImageProcessor.from_pretrained(args.img_vit_encoder_path)  # 앞으로 빼기
-        self.img_enc_processor.size['shortest_edge'] = args.img_encoder_size[0]
-        self.img_enc_processor.do_center_crop = False
+        self.img_enc_processor = {}
+        for scales in args.img_encoder_size:
+            scale = scales[0]
+            self.img_enc_processor[scale] = AutoImageProcessor.from_pretrained(args.img_vit_encoder_path)  # 앞으로 빼기
+            self.img_enc_processor[scale].size['shortest_edge'] = scale
+            self.img_enc_processor[scale].do_center_crop = False
 
         self.colorjitter_aug = transforms.Compose([
             # transforms.RandomResizedCrop(size=args.img_encoder_size, scale=(0.9, 1.0), ratio=(0.9, 1.1)),
@@ -140,22 +143,18 @@ class Fathomnet_Dataset(Dataset):
 
 
         if self.phase == 'train'  and self.args.transform:
-            # oh, ow, oc = obj_img.shape
-            # if random.random() > 0.5 and (oh > 10 and ow > 10):
-            #     resize_factor = random.uniform(0.1, 0.9)
-            #     new_width = int(obj_img.shape[1] * resize_factor)
-            #     new_height = int(obj_img.shape[0] * resize_factor)
-            #     obj_img = cv2.resize(obj_img, (new_width, new_height), interpolation=cv2.INTER_AREA)
             obj_img = self.colorjitter_aug(Image.fromarray(obj_img))
-            # env_image = self.colorjitter_aug(env_image)
+            env_image = self.colorjitter_aug(env_image)
         else:
             obj_img = Image.fromarray(obj_img)
 
-        # if image.mode == 'L':
-        #     obj_img = obj_img.convert('RGB')
-
         obj_processed_img = (self.obj_enc_processor(images=obj_img.resize(self.args.obj_encoder_size),return_tensors="pt").pixel_values).squeeze(dim=0)  ###224
-        img_processed_img = (self.img_enc_processor(images=env_image.resize(self.args.img_encoder_size),return_tensors="pt").pixel_values).squeeze(dim=0)
+
+        img_processed = {}
+        for scales in self.args.img_encoder_size:
+            scale = scales[0]
+            img_processed['global_processed_img'+str(scale)] = (self.img_enc_processor[scale](images=env_image.resize(scales),
+                                                    return_tensors="pt").pixel_values).squeeze(dim=0)
 
         if str(category_id) == 'None':
             category_id = -1
@@ -163,10 +162,12 @@ class Fathomnet_Dataset(Dataset):
         target = category_id
         anno['category_id'] = category_id
         anno['filepath'] = image_path
-        return {
+
+        res_dat = {
             "obj_processed_img": obj_processed_img,
-            "global_processed_img": img_processed_img,
             "obj_mask" : img_mask,
             "target" : target,
-            "obj_anno": anno
-        }
+            "obj_anno": anno}
+        res_dat.update(img_processed)
+
+        return res_dat
