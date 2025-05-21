@@ -142,72 +142,68 @@ class MultiLayerAttentionModel(nn.Module):
             q, attn_weights = layer(q, kv, mask)
         return q
 
+class BidirectionalAttentionBlock(nn.Module):
+    def __init__(self, dim, num_heads=4, num_blocks=3, dropout=0.2):
+        super().__init__()
+        self.obj2env = MultiLayerAttentionModel(query_dim=dim,
+                                                embed_dim=dim,
+                                                num_heads=num_heads,
+                                                num_blocks=num_blocks,
+                                                dropout=dropout)
+
+        self.env2obj = MultiLayerAttentionModel(query_dim=dim,
+                                                embed_dim=dim,
+                                                num_heads=num_heads,
+                                                num_blocks=num_blocks,
+                                                dropout=dropout)
+
+        self.obj_mlp0 = MLP_ProjModel(in_dim = dim,
+                                     hidden_dim = dim,
+                                     out_dim = dim,
+                                     dropout = dropout)
+        self.env_mlp0 = MLP_ProjModel(in_dim = dim,
+                                     hidden_dim = dim,
+                                     out_dim = dim,
+                                     dropout = dropout)
+
+        self.obj_mlp1 = MLP_ProjModel(in_dim = dim,
+                                     hidden_dim = dim,
+                                     out_dim = dim,
+                                     dropout = dropout)
+        self.env_mlp1 = MLP_ProjModel(in_dim = dim,
+                                     hidden_dim = dim,
+                                     out_dim = dim,
+                                     dropout = dropout)
+
+        self.obj_self_attn = MultiLayerAttentionModel(query_dim=dim,
+                                                embed_dim=dim,
+                                                num_heads=num_heads,
+                                                num_blocks=num_blocks,
+                                                dropout=dropout)
+
+        self.env_self_attn = MultiLayerAttentionModel(query_dim=dim,
+                                                embed_dim=dim,
+                                                num_heads=num_heads,
+                                                num_blocks=num_blocks,
+                                                dropout=dropout)
 
 
-class Combiner(nn.Module):
-    """
-    reference : https://github.com/ABaldrati/CLIP4Cir/blob/master/src/combiner.py
-    Combiner module which once trained fuses textual and visual information
-    """
+    def forward(self, obj_embeddings, env_embeddings):
+        obj_out0 = self.obj2env(obj_embeddings, env_embeddings)
+        env_out0 = self.env2obj(env_embeddings, obj_embeddings)
 
-    def __init__(self, img_feature_dim: int, projection_dim: int, hidden_dim: int):
-        """
-        :param clip_feature_dim: CLIP input feature dimension
-        :param projection_dim: projection dimension
-        :param hidden_dim: hidden dimension
-        """
-        super(Combiner, self).__init__()
-        self.kpt_projection_layer = nn.Linear(img_feature_dim, projection_dim)
-        self.image_projection_layer = nn.Linear(img_feature_dim, projection_dim)
+        obj_out1 = obj_embeddings + self.obj_mlp0(obj_out0)
+        env_out1 = env_embeddings + self.env_mlp0(env_out0)
 
-        self.dropout1 = nn.Dropout(0.5)
-        self.dropout2 = nn.Dropout(0.5)
+        obj_out2 = self.obj_self_attn(obj_out1, obj_out1)
+        env_out2 = self.env_self_attn(env_out1, env_out1)
 
-        self.combiner_layer = nn.Linear(projection_dim * 2, hidden_dim)
-        self.output_layer = nn.Linear(hidden_dim, img_feature_dim)
+        obj_final = obj_out1 + self.obj_mlp0(obj_out2)
+        env_final = env_out1 + self.env_mlp0(env_out2)
 
-        self.dropout3 = nn.Dropout(0.5)
-        self.dynamic_scalar = nn.Sequential(nn.Linear(projection_dim * 2, hidden_dim),
-                                            nn.ReLU(), nn.Dropout(0.5),
-                                            nn.Linear(hidden_dim, 1), nn.Sigmoid())
+        return obj_final, env_final
 
-        self.logit_scale = 100
 
-    # def forward(self, image_features: torch.tensor, kpt_features: torch.tensor,
-    #             target_features: torch.tensor) -> torch.tensor:
-    def forward(self, image_features: torch.tensor, kpt_features: torch.tensor) -> torch.tensor:
-        """
-        Takes as input a triplet: image_features, text_features and target_features and outputs the logits which are
-        the normalized dot product between the predicted features and the target_features.
-        The logits are also multiplied by logit_scale parameter
-        :param image_features: CLIP reference image features
-        :param text_features: CLIP relative caption features
-        :param target_features: CLIP target image features
-        :return: scaled logits
-        """
-        predicted_features = F.normalize(self.combine_features(image_features, kpt_features), dim=-1)
-        # target_features = F.normalize(target_features, dim=-1)
-        # logits = self.logit_scale * predicted_features @ target_features.T
-        # return logits
-        return predicted_features
-
-    def combine_features(self, image_features: torch.tensor, kpt_features: torch.tensor) -> torch.tensor:
-        """
-        Combine the reference image features and the caption features. It outputs the predicted features
-        :param image_features: CLIP reference image features
-        :param text_features: CLIP relative caption features
-        :return: predicted features
-        """
-        kpt_projected_features = self.dropout1(F.relu(self.kpt_projection_layer(kpt_features)))
-        image_projected_features = self.dropout2(F.relu(self.image_projection_layer(image_features)))
-
-        raw_combined_features = torch.cat((kpt_projected_features, image_projected_features), -1)
-        combined_features = self.dropout3(F.relu(self.combiner_layer(raw_combined_features)))
-        dynamic_scalar = self.dynamic_scalar(raw_combined_features)
-        output = self.output_layer(combined_features) + dynamic_scalar * kpt_features + (
-                1 - dynamic_scalar) * image_features
-        # return F.normalize(output, dim=-1)
-        return output
 
 class FathomnetModel(pl.LightningModule):
     def __init__(self, args):
@@ -230,15 +226,19 @@ class FathomnetModel(pl.LightningModule):
         #                          self.hparams.feature_dim)
         n_concat = 1
         if self.hparams.intra_env_attn:
-            self.intra_env_attn_module = nn.ModuleDict()
-            # n_concat += 1
+            self.bi_attn_module = nn.ModuleDict()
             for scales in self.hparams.img_encoder_size:
-                # n_concat += 1
-                self.intra_env_attn_module[str(scales[0])] = MultiLayerAttentionModel(query_dim=self.hparams.feature_dim,
-                                                                           embed_dim=self.hparams.feature_dim,
-                                                                           num_heads=8,
-                                                                           num_blocks=4,
-                                                                           dropout=0.2).cuda()
+                n_concat += 1
+                scale_key = str(scales[0])
+                self.bi_attn_module[scale_key] = nn.ModuleList()
+                for i in range(self.hparams.attn_module_depth):
+                    self.bi_attn_module[scale_key].append(
+                                        BidirectionalAttentionBlock(
+                                                        dim=self.hparams.feature_dim,
+                                                        num_heads=4,
+                                                        num_blocks=3,
+                                                        dropout=0.2))
+
         if self.hparams.obj_cnn_feature:
             n_concat += 1
             self.obj_cnn_region_encoder = AutoModel.from_pretrained(self.hparams.obj_cnn_encoder_path)
@@ -382,41 +382,43 @@ class FathomnetModel(pl.LightningModule):
 
         global_processed_imgs = {}
         for scales in self.hparams.img_encoder_size:
-            scale = scales[0]
-            global_processed_imgs[scale] = batch[f'global_processed_img{scale}']
+            global_processed_imgs[str(scales[0])] = batch[f'global_processed_img{scales[0]}']
 
         # obj_masks = batch['obj_mask']
         target = batch['target']
 
         obj_vit_enc_out = self.obj_vit_region_encoder(obj_processed_imgs)
-        obj_vit_embeddings = obj_vit_enc_out.last_hidden_state[:, :1, :]
+        obj_vit_embeddings = obj_vit_enc_out.last_hidden_state[:, :, :]
 
-        img_vit_g_embeddings = {}
-        img_vit_p_embeddings = {}
+        img_vit_whole_embeddings = {}
         for scales in self.hparams.img_encoder_size:
-            img_vit_enc_out = self.img_vit_region_encoders[str(scales[0])](global_processed_imgs[scales[0]])
-            img_vit_g_embeddings[scales[0]] = img_vit_enc_out.last_hidden_state[:, :1, :]
-            img_vit_p_embeddings[scales[0]] = img_vit_enc_out.last_hidden_state[:, 1:, :]
+            img_vit_enc_out = self.img_vit_region_encoders[str(scales[0])](global_processed_imgs[str(scales[0])])
+            img_vit_whole_embeddings[str(scales[0])] = img_vit_enc_out.last_hidden_state[:, :, :]
 
         batch_size, _, _ = obj_vit_embeddings.shape
         # flattend_obj_masks = obj_masks.reshape(batch_size, -1)
-        # obj_vit_embeddings = obj_vit_embeddings
-        concat_embs = obj_vit_embeddings.view(batch_size, -1)
+
         if self.hparams.intra_env_attn:
-            intra_env_embs_dcit = {}
+            intra_env_embs_dict = {}
             for scales in self.hparams.img_encoder_size:
-                intra_env_embs_dcit[scales[0]] = self.intra_env_attn_module[str(scales[0])](obj_vit_embeddings, img_vit_p_embeddings[scales[0]]).view(batch_size, -1)
-            intra_env_embs = torch.concat(list(intra_env_embs_dcit.values()), 1)
-            # intra_env_embs = torch.stack(list(intra_env_embs_dcit.values())).mean(0)
-            concat_embs = torch.concat((concat_embs, intra_env_embs), dim=-1)
-            # concat_embs = self.combiner(obj_vit_embeddings.view(batch_size, -1), intra_env_embs)
+                scale_key = str(scales[0])
+                img_feat = img_vit_whole_embeddings[scale_key]
+                obj_feat = obj_vit_embeddings
+
+                for i in range(self.hparams.attn_module_depth):
+                    obj_feat, img_feat = self.bi_attn_module[scale_key][i](obj_feat, img_feat)
+
+                # [32, 768+768]
+                intra_env_embs_dict[scale_key] = torch.concat((obj_feat[:,:1,:], img_feat[:,:1,:]), dim=2).squeeze()
+
+            concat_embs = torch.concat(list(intra_env_embs_dict.values()), 1) # [32, 3072]
+            # concat_embs = torch.concat((concat_embs, intra_env_embs), dim=-1)
 
         if self.hparams.inter_env_attn:
             pass
 
         if self.hparams.obj_cnn_feature:
             pass
-
 
         embs = self.concat_proj(concat_embs)
 
