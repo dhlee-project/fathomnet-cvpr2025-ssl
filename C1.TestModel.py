@@ -63,7 +63,7 @@ def load_logger(config):
 
 def get_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default='./config/experiment39.yaml', help='Path to config file')
+    parser.add_argument("--config", type=str, default='./config/experiment45.yaml', help='Path to config file')
     parser.add_argument("--mode", type=str, default=None)
     parser.add_argument("--host", type=str, default=None)
     parser.add_argument("--port", type=str, default=None)
@@ -157,7 +157,9 @@ for current_fold in range(n_fold):
                 for scales in Fathomnet_model.hparams.img_encoder_size:
                     intra_env_embs_dcit[scales[0]] = Fathomnet_model.intra_env_attn_module[str(scales[0])](obj_vit_embeddings, img_vit_p_embeddings[scales[0]]).view(batch_size, -1)
                 intra_env_embs = torch.concat(list(intra_env_embs_dcit.values()), -1)
-                concat_embs = torch.concat((concat_embs, intra_env_embs), dim=-1)
+                # concat_embs = torch.concat((concat_embs, intra_env_embs), dim=-1)
+                concat_embs = Fathomnet_model.combiner(obj_vit_embeddings.view(batch_size, -1), intra_env_embs)
+
             if Fathomnet_model.hparams.inter_env_attn:
                 fused_embdding = img_vit_g_embeddings
                 proj_concat_embs = Fathomnet_model.center_embs_proj(Fathomnet_model.center_embs[:batch_size])
@@ -171,6 +173,7 @@ for current_fold in range(n_fold):
                 obj_cnn_enc_out = obj_cnn_enc_out.pooler_output.view(batch_size, -1)
                 proj_obj_cnn_enc = Fathomnet_model.cnn_embs_proj(obj_cnn_enc_out)
                 concat_embs = torch.concat((concat_embs, proj_obj_cnn_enc), dim=-1)
+
 
             embs = Fathomnet_model.concat_proj(concat_embs)
             logits = Fathomnet_model.classifier(embs).squeeze()
@@ -189,4 +192,4 @@ voted_submission = (
     .agg(lambda x: x.mode().iloc[0])  # 최빈값 (복수일 경우 첫 번째 선택)
     .reset_index()
 )
-voted_submission.to_csv(f"./results/submission_{config.project_name}_0519_01.csv", index=False)
+voted_submission.to_csv(f"./results/submission_{config.project_name}_0521_01.csv", index=False)
