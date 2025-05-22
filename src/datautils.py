@@ -46,10 +46,11 @@ class Fathomnet_Dataset(Dataset):
 
         self.img_enc_processor = {}
         for scales in args.img_encoder_size:
-            scale = scales[0]
-            self.img_enc_processor[scale] = AutoImageProcessor.from_pretrained(args.img_vit_encoder_path)  # 앞으로 빼기
-            self.img_enc_processor[scale].size['shortest_edge'] = scale
-            self.img_enc_processor[scale].do_center_crop = False
+            for crop_scale in args.env_img_crop_scale_list:
+                _name = str(scales[0])+'_'+str(crop_scale)
+                self.img_enc_processor[_name] = AutoImageProcessor.from_pretrained(args.img_vit_encoder_path)  # 앞으로 빼기
+                self.img_enc_processor[_name].size['shortest_edge'] = scales[0]
+                self.img_enc_processor[_name].do_center_crop = False
 
         self.colorjitter_aug = transforms.Compose([
             # transforms.RandomResizedCrop(size=args.img_encoder_size, scale=(0.9, 1.0), ratio=(0.9, 1.1)),
@@ -71,15 +72,15 @@ class Fathomnet_Dataset(Dataset):
 
         self.args = args
 
-        if self.phase == 'train' or self.phase == 'valid':
-            self.cate_img_dict = {}
-            for k in range(len(self.annodata)):
-                _dat = self.annodata[k]
-                _img_id = _dat['image_id']
-                _cate_id = _dat['category_id']
-                if _cate_id not in self.cate_img_dict.keys():
-                    self.cate_img_dict[_cate_id] = []
-                self.cate_img_dict[_cate_id].append(_img_id)
+        # if self.phase == 'train' or self.phase == 'valid':
+        #     self.cate_img_dict = {}
+        #     for k in range(len(self.annodata)):
+        #         _dat = self.annodata[k]
+        #         _img_id = _dat['image_id']
+        #         _cate_id = _dat['category_id']
+        #         if _cate_id not in self.cate_img_dict.keys():
+        #             self.cate_img_dict[_cate_id] = []
+        #         self.cate_img_dict[_cate_id].append(_img_id)
 
     def __len__(self):
         return len(self.annodata)
@@ -92,22 +93,22 @@ class Fathomnet_Dataset(Dataset):
 
         if self.phase == 'train' or self.phase == 'valid':
             image_path = os.path.join('./dataset/fathomnet-2025/train_data/images',str(img_id)+'.png')
-            mask_path = os.path.join('./dataset/fathomnet-2025/train_data/masks',str(img_id)+'.npy')
-            img_mask = torch.tensor(np.load(mask_path))[None,:,:]
-            img_mask = self.resize(img_mask)
+            # mask_path = os.path.join('./dataset/fathomnet-2025/train_data/masks',str(img_id)+'.npy')
+            # img_mask = torch.tensor(np.load(mask_path))[None,:,:]
+            # img_mask = self.resize(img_mask)
         else:
             image_path = os.path.join('./dataset/fathomnet-2025/test_data/images',str(img_id)+'.png')
-            img_mask = 0
+            # img_mask = 0
 
-        if self.args.imgxaug:
-            env_img_id = random.choice(self.cate_img_dict[category_id])
-            env_image_path = os.path.join('./dataset/fathomnet-2025/train_data/images', str(env_img_id) + '.png')
-
-            image = Image.open(image_path)
-            env_image = Image.open(env_image_path)
-        else:
-            image = Image.open(image_path)
-            env_image = image
+        # if self.args.imgxaug:
+        #     env_img_id = random.choice(self.cate_img_dict[category_id])
+        #     env_image_path = os.path.join('./dataset/fathomnet-2025/train_data/images', str(env_img_id) + '.png')
+        #
+        #     image = Image.open(image_path)
+        #     env_image = Image.open(env_image_path)
+        # else:
+        image = Image.open(image_path)
+        env_image = image
 
         if image.mode == 'L':
             image = image.convert('RGB')
@@ -115,6 +116,20 @@ class Fathomnet_Dataset(Dataset):
         init_x, init_y, w, h = bbox
         center_x = int(init_x + w // 2)
         center_y = int(init_y + h // 2)
+
+        env_image_dict = {}
+        for crop_scale in self.args.env_img_crop_scale_list:
+            if crop_scale == -1: # -1인 경우 전체
+                crop_size = max(img_h, img_w)
+            else:
+                crop_size = max(w, h)//2 * crop_scale
+            y1 = int(max(center_y - crop_size, 0))
+            y2 = int(min(center_y + crop_size, img_h))
+            x1 = int(max(center_x - crop_size, 0))
+            x2 = int(min(center_x + crop_size, img_w))
+            w_img = np.array(image)[y1:y2, x1:x2, :]
+            # w_img = pad_to_square(w_img, pad_value=0)
+            env_image_dict[crop_scale] = Image.fromarray(w_img)
 
         if self.phase == 'train' and self.args.transform:
             object_crop = random.choice(['narrow', 'padding', 'square'])
@@ -143,14 +158,15 @@ class Fathomnet_Dataset(Dataset):
 
 
         if self.phase == 'train'  and self.args.transform:
-            oh, ow, oc = obj_img.shape
-            if random.random() > 0.9 and (oh > 10 and ow > 10):
-                resize_factor = random.uniform(0.1, 0.9)
-                new_width = int(obj_img.shape[1] * resize_factor)
-                new_height = int(obj_img.shape[0] * resize_factor)
-                obj_img = cv2.resize(obj_img, (new_width, new_height), interpolation=cv2.INTER_AREA)
+            # oh, ow, oc = obj_img.shape
+            # if random.random() > 0.9 and (oh > 10 and ow > 10):
+            #     resize_factor = random.uniform(0.1, 0.9)
+            #     new_width = int(obj_img.shape[1] * resize_factor)
+            #     new_height = int(obj_img.shape[0] * resize_factor)
+            #     obj_img = cv2.resize(obj_img, (new_width, new_height), interpolation=cv2.INTER_AREA)
             obj_img = self.colorjitter_aug(Image.fromarray(obj_img))
-            env_image = self.colorjitter_aug(env_image)
+            for k in env_image_dict:
+                env_image_dict[k] = self.colorjitter_aug(env_image_dict[k])
         else:
             obj_img = Image.fromarray(obj_img)
 
@@ -158,8 +174,10 @@ class Fathomnet_Dataset(Dataset):
 
         img_processed = {}
         for scales in self.args.img_encoder_size:
-            scale = scales[0]
-            img_processed['global_processed_img'+str(scale)] = (self.img_enc_processor[scale](images=env_image.resize(scales),
+            for crop_scale in self.args.env_img_crop_scale_list:
+                scale = scales[0]
+                _name = str(scale)+'_'+str(crop_scale)
+                img_processed['global_processed_img'+_name] = (self.img_enc_processor[_name](images=env_image_dict[crop_scale].resize(scales),
                                                     return_tensors="pt").pixel_values).squeeze(dim=0)
 
         if str(category_id) == 'None':
@@ -171,7 +189,7 @@ class Fathomnet_Dataset(Dataset):
 
         res_dat = {
             "obj_processed_img": obj_processed_img,
-            "obj_mask" : img_mask,
+            # "obj_mask" : img_mask,
             "target" : target,
             "obj_anno": anno}
         res_dat.update(img_processed)

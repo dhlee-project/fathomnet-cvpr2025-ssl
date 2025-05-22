@@ -142,8 +142,6 @@ class MultiLayerAttentionModel(nn.Module):
             q, attn_weights = layer(q, kv, mask)
         return q
 
-
-
 class Combiner(nn.Module):
     """
     reference : https://github.com/ABaldrati/CLIP4Cir/blob/master/src/combiner.py
@@ -217,7 +215,8 @@ class FathomnetModel(pl.LightningModule):
         # assert self.hparams.temperature > 0.0, "The temperature must be a positive float!"
         self.img_vit_region_encoders = nn.ModuleDict()
         for scales in self.hparams.img_encoder_size:
-            self.img_vit_region_encoders[str(scales[0])] = AutoModel.from_pretrained(self.hparams.img_vit_encoder_path)
+            for crop_scale in self.hparams.env_img_crop_scale_list:
+                self.img_vit_region_encoders[str(scales[0])+'_'+str(crop_scale)] = AutoModel.from_pretrained(self.hparams.img_vit_encoder_path)
 
         self.obj_vit_region_encoder  = AutoModel.from_pretrained(self.hparams.obj_vit_encoder_path)
 
@@ -228,17 +227,24 @@ class FathomnetModel(pl.LightningModule):
         # self.combiner = Combiner(self.hparams.feature_dim,
         #                          self.hparams.feature_dim,
         #                          self.hparams.feature_dim)
+
         n_concat = 1
         if self.hparams.intra_env_attn:
             self.intra_env_attn_module = nn.ModuleDict()
-            # n_concat += 1
+            self.obj_proj_module = nn.ModuleDict()
             for scales in self.hparams.img_encoder_size:
-                # n_concat += 1
-                self.intra_env_attn_module[str(scales[0])] = MultiLayerAttentionModel(query_dim=self.hparams.feature_dim,
-                                                                           embed_dim=self.hparams.feature_dim,
-                                                                           num_heads=8,
-                                                                           num_blocks=4,
-                                                                           dropout=0.2).cuda()
+                for crop_scale in self.hparams.env_img_crop_scale_list:
+                    n_concat += 1
+                    _name = str(scales[0]) + '_' + str(crop_scale)
+                    self.intra_env_attn_module[_name] = MultiLayerAttentionModel(query_dim=self.hparams.feature_dim,
+                                                                               embed_dim=self.hparams.feature_dim,
+                                                                               num_heads=8,
+                                                                               num_blocks=4,
+                                                                               dropout=0.2).cuda()
+                    self.obj_proj_module[_name] = MLP_ProjModel(in_dim=self.hparams.feature_dim,
+                                                          hidden_dim=self.hparams.feature_dim,
+                                                          out_dim=self.hparams.feature_dim, dropout=0.2)
+
         if self.hparams.obj_cnn_feature:
             n_concat += 1
             self.obj_cnn_region_encoder = AutoModel.from_pretrained(self.hparams.obj_cnn_encoder_path)
@@ -383,8 +389,9 @@ class FathomnetModel(pl.LightningModule):
         global_processed_imgs = {}
         for scales in self.hparams.img_encoder_size:
             scale = scales[0]
-            global_processed_imgs[scale] = batch[f'global_processed_img{scale}']
-
+            for crop_scale in self.hparams.env_img_crop_scale_list:
+                _name = str(scale) + '_' + str(crop_scale)
+                global_processed_imgs[_name] = batch['global_processed_img' + _name]
         # obj_masks = batch['obj_mask']
         target = batch['target']
 
@@ -394,29 +401,29 @@ class FathomnetModel(pl.LightningModule):
         img_vit_g_embeddings = {}
         img_vit_p_embeddings = {}
         for scales in self.hparams.img_encoder_size:
-            img_vit_enc_out = self.img_vit_region_encoders[str(scales[0])](global_processed_imgs[scales[0]])
-            img_vit_g_embeddings[scales[0]] = img_vit_enc_out.last_hidden_state[:, :1, :]
-            img_vit_p_embeddings[scales[0]] = img_vit_enc_out.last_hidden_state[:, 1:, :]
+            for crop_scale in self.hparams.env_img_crop_scale_list:
+                _name = str(scales[0])+'_'+str(crop_scale)
+                img_vit_enc_out = self.img_vit_region_encoders[_name](global_processed_imgs[_name])
+                img_vit_g_embeddings[_name] = img_vit_enc_out.last_hidden_state[:, :1, :]
+                img_vit_p_embeddings[_name] = img_vit_enc_out.last_hidden_state[:, 1:, :]
 
         batch_size, _, _ = obj_vit_embeddings.shape
-        # flattend_obj_masks = obj_masks.reshape(batch_size, -1)
-        # obj_vit_embeddings = obj_vit_embeddings
         concat_embs = obj_vit_embeddings.view(batch_size, -1)
         if self.hparams.intra_env_attn:
-            intra_env_embs_dcit = {}
+            intra_env_embs_dict = {}
             for scales in self.hparams.img_encoder_size:
-                intra_env_embs_dcit[scales[0]] = self.intra_env_attn_module[str(scales[0])](obj_vit_embeddings, img_vit_p_embeddings[scales[0]]).view(batch_size, -1)
-            intra_env_embs = torch.concat(list(intra_env_embs_dcit.values()), 1)
-            # intra_env_embs = torch.stack(list(intra_env_embs_dcit.values())).mean(0)
+                for crop_scale in self.hparams.env_img_crop_scale_list:
+                    _name = str(scales[0])+'_'+str(crop_scale)
+                    obj_vit_emb_out = self.obj_proj_module[_name](obj_vit_embeddings)
+                    intra_env_embs_dict[_name] = self.intra_env_attn_module[_name](obj_vit_emb_out, img_vit_p_embeddings[_name]).view(batch_size, -1)
+            intra_env_embs = torch.concat(list(intra_env_embs_dict.values()), 1)
             concat_embs = torch.concat((concat_embs, intra_env_embs), dim=-1)
-            # concat_embs = self.combiner(obj_vit_embeddings.view(batch_size, -1), intra_env_embs)
 
         if self.hparams.inter_env_attn:
             pass
 
         if self.hparams.obj_cnn_feature:
             pass
-
 
         embs = self.concat_proj(concat_embs)
 

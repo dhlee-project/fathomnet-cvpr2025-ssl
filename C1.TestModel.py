@@ -63,7 +63,7 @@ def load_logger(config):
 
 def get_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default='./config/experiment45.yaml', help='Path to config file')
+    parser.add_argument("--config", type=str, default='./config/experiment48.yaml', help='Path to config file')
     parser.add_argument("--mode", type=str, default=None)
     parser.add_argument("--host", type=str, default=None)
     parser.add_argument("--port", type=str, default=None)
@@ -137,8 +137,11 @@ for current_fold in range(n_fold):
 
             global_processed_imgs = {}
             for scales in Fathomnet_model.hparams.img_encoder_size:
-                scale = scales[0]
-                global_processed_imgs[scale] = batch[f'global_processed_img{scale}'].to(device)
+                for crop_scale in Fathomnet_model.hparams.env_img_crop_scale_list:
+                    _name = str(scales[0]) + '_' + str(crop_scale)
+                    global_processed_imgs[_name] = batch[f'global_processed_img{_name}'].to(device)
+            # obj_masks = batch['obj_mask']
+
 
             batch_size, _, _, _ = obj_processed_imgs.shape
             obj_vit_enc_out = Fathomnet_model.obj_vit_region_encoder(obj_processed_imgs)
@@ -147,33 +150,28 @@ for current_fold in range(n_fold):
             img_vit_g_embeddings = {}
             img_vit_p_embeddings = {}
             for scales in Fathomnet_model.hparams.img_encoder_size:
-                img_vit_enc_out = Fathomnet_model.img_vit_region_encoders[str(scales[0])](global_processed_imgs[scales[0]])
-                img_vit_g_embeddings[scales[0]] = img_vit_enc_out.last_hidden_state[:, :1, :]
-                img_vit_p_embeddings[scales[0]] = img_vit_enc_out.last_hidden_state[:, 1:, :]
+                for crop_scale in Fathomnet_model.hparams.env_img_crop_scale_list:
+                    _name = str(scales[0]) + '_' + str(crop_scale)
+                    img_vit_enc_out = Fathomnet_model.img_vit_region_encoders[_name](global_processed_imgs[_name])
+                    img_vit_g_embeddings[_name] = img_vit_enc_out.last_hidden_state[:, :1, :]
+                    img_vit_p_embeddings[_name] = img_vit_enc_out.last_hidden_state[:, 1:, :]
 
             concat_embs = obj_vit_embeddings.view(obj_vit_embeddings.shape[0], -1)
             if Fathomnet_model.hparams.intra_env_attn:
                 intra_env_embs_dcit = {}
                 for scales in Fathomnet_model.hparams.img_encoder_size:
-                    intra_env_embs_dcit[scales[0]] = Fathomnet_model.intra_env_attn_module[str(scales[0])](obj_vit_embeddings, img_vit_p_embeddings[scales[0]]).view(batch_size, -1)
+                    for crop_scale in Fathomnet_model.hparams.env_img_crop_scale_list:
+                        _name = str(scales[0]) + '_' + str(crop_scale)
+                        intra_env_embs_dcit[_name] = Fathomnet_model.intra_env_attn_module[_name](obj_vit_embeddings, img_vit_p_embeddings[_name]).view(batch_size, -1)
                 intra_env_embs = torch.concat(list(intra_env_embs_dcit.values()), -1)
-                # concat_embs = torch.concat((concat_embs, intra_env_embs), dim=-1)
-                concat_embs = Fathomnet_model.combiner(obj_vit_embeddings.view(batch_size, -1), intra_env_embs)
+                concat_embs = torch.concat((concat_embs, intra_env_embs), dim=-1)
+                # concat_embs = Fathomnet_model.combiner(obj_vit_embeddings.view(batch_size, -1), intra_env_embs)
 
             if Fathomnet_model.hparams.inter_env_attn:
-                fused_embdding = img_vit_g_embeddings
-                proj_concat_embs = Fathomnet_model.center_embs_proj(Fathomnet_model.center_embs[:batch_size])
-                inter_env_embs = Fathomnet_model.inter_env_attn_module(
-                                                                       fused_embdding, proj_concat_embs
-                                                                       ).view(obj_vit_embeddings.shape[0], -1)
-                concat_embs = torch.concat((concat_embs, inter_env_embs), dim=-1)
+                pass
 
             if Fathomnet_model.hparams.obj_cnn_feature:
-                obj_cnn_enc_out = Fathomnet_model.obj_cnn_region_encoder(obj_processed_imgs)
-                obj_cnn_enc_out = obj_cnn_enc_out.pooler_output.view(batch_size, -1)
-                proj_obj_cnn_enc = Fathomnet_model.cnn_embs_proj(obj_cnn_enc_out)
-                concat_embs = torch.concat((concat_embs, proj_obj_cnn_enc), dim=-1)
-
+                pass
 
             embs = Fathomnet_model.concat_proj(concat_embs)
             logits = Fathomnet_model.classifier(embs).squeeze()
@@ -192,4 +190,4 @@ voted_submission = (
     .agg(lambda x: x.mode().iloc[0])  # 최빈값 (복수일 경우 첫 번째 선택)
     .reset_index()
 )
-voted_submission.to_csv(f"./results/submission_{config.project_name}_0521_01.csv", index=False)
+voted_submission.to_csv(f"./results/submission_{config.project_name}_0522_01.csv", index=False)
