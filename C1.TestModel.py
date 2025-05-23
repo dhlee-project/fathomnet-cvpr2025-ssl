@@ -63,7 +63,7 @@ def load_logger(config):
 
 def get_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default='./config/experiment48.yaml', help='Path to config file')
+    parser.add_argument("--config", type=str, default='./config/experiment54.yaml', help='Path to config file')
     parser.add_argument("--mode", type=str, default=None)
     parser.add_argument("--host", type=str, default=None)
     parser.add_argument("--port", type=str, default=None)
@@ -107,7 +107,7 @@ results = []
 n_fold = config.kfold_nsplits
 for current_fold in range(n_fold):
     model_path = f'~/Project/cvprcom/logs/{config.project_name}/Fold-{current_fold}/last.ckpt'
-    Fathomnet_model = FathomnetModel.load_from_checkpoint(model_path).to(device)
+    Fathomnet_model = FathomnetModel.load_from_checkpoint(model_path, inter_env_attn=False).to(device)
     Fathomnet_model.eval()
 
     config.current_fold = current_fold
@@ -166,12 +166,6 @@ for current_fold in range(n_fold):
                 intra_env_embs = torch.concat(list(intra_env_embs_dcit.values()), -1)
                 concat_embs = torch.concat((concat_embs, intra_env_embs), dim=-1)
                 # concat_embs = Fathomnet_model.combiner(obj_vit_embeddings.view(batch_size, -1), intra_env_embs)
-
-            if Fathomnet_model.hparams.inter_env_attn:
-                pass
-
-            if Fathomnet_model.hparams.obj_cnn_feature:
-                pass
 
             embs = Fathomnet_model.concat_proj(concat_embs)
             logits = Fathomnet_model.classifier(embs).squeeze()

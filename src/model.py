@@ -224,10 +224,6 @@ class FathomnetModel(pl.LightningModule):
                                                hidden_dim=self.hparams.feature_dim,
                                                out_dim=self.hparams.nclass, dropout=0.4)
 
-        # self.combiner = Combiner(self.hparams.feature_dim,
-        #                          self.hparams.feature_dim,
-        #                          self.hparams.feature_dim)
-
         n_concat = 1
         if self.hparams.intra_env_attn:
             self.intra_env_attn_module = nn.ModuleDict()
@@ -240,76 +236,32 @@ class FathomnetModel(pl.LightningModule):
                                                                                embed_dim=self.hparams.feature_dim,
                                                                                num_heads=8,
                                                                                num_blocks=4,
-                                                                               dropout=0.2).cuda()
+                                                                               dropout=0.4).cuda()
                     self.obj_proj_module[_name] = MLP_ProjModel(in_dim=self.hparams.feature_dim,
                                                           hidden_dim=self.hparams.feature_dim,
-                                                          out_dim=self.hparams.feature_dim, dropout=0.2)
-
-        if self.hparams.obj_cnn_feature:
-            n_concat += 1
-            self.obj_cnn_region_encoder = AutoModel.from_pretrained(self.hparams.obj_cnn_encoder_path)
-            self.cnn_embs_proj = MLP_ProjModel(in_dim=2048,
-                                                   hidden_dim=self.hparams.feature_dim,
-                                                   out_dim=self.hparams.feature_dim, dropout=0.2)
-
-        if self.hparams.inter_env_attn:
-            n_concat += 1
-            self.center_embs_proj = MLP_ProjModel(in_dim=self.hparams.feature_dim,
-                                                   hidden_dim=self.hparams.feature_dim,
-                                                   out_dim=self.hparams.feature_dim, dropout=0.2)
-
-            self.gate_module = GATE_MLP_ProjModel(in_dim=self.hparams.feature_dim,
-                                                   hidden_dim=self.hparams.feature_dim,
-                                                   out_dim=1, dropout=0.2)
-
-            self.inter_env_attn_module = MultiLayerAttentionModel(query_dim=self.hparams.feature_dim,
-                                                                       embed_dim=self.hparams.feature_dim,
-                                                                       num_heads=4,
-                                                                       num_blocks=3,
-                                                                       dropout=0.2)
-
-            self.centroid_attn_module = MultiLayerAttentionModel(query_dim=self.hparams.feature_dim,
-                                                                       embed_dim=self.hparams.feature_dim,
-                                                                       num_heads=4,
-                                                                       num_blocks=3,
-                                                                       dropout=0.2)
-            self.centroid_cls_token = nn.Parameter(torch.zeros(1, self.hparams.feature_dim))
+                                                          out_dim=self.hparams.feature_dim, dropout=0.4)
 
         if self.hparams.hierarchical_loss:
             self.hierarchical_target = pd.read_csv(self.hparams.hierarchical_label_path, index_col=0)
             with open(self.hparams.hierachical_labelencoder_path, 'rb') as f:
                 self.hierachical_labelencoder = pickle.load(f)
-            # with open(self.hparams.hierachical_tree_path, 'rb') as f:
-            #     self.hierachical_tree = pickle.load(f)
+
             self.rank = self.hparams.hierarchical_node_rank
             self.hierarchical_classifier = hierarchical_classifier(in_dim=self.hparams.feature_dim,
                                                  hidden_dim=self.hparams.feature_dim,
-                                                 out_dim_list=self.hparams.hierarchical_node_cnt, dropout=0.2)
+                                                 out_dim_list=self.hparams.hierarchical_node_cnt, dropout=0.4)
 
         self.concat_proj = MLP_ProjModel(in_dim=self.hparams.feature_dim*n_concat,
                                                hidden_dim=self.hparams.feature_dim,
-                                               out_dim=self.hparams.feature_dim, dropout=0.2)
+                                               out_dim=self.hparams.feature_dim, dropout=0.4)
 
-        self.label_distance = pd.read_csv(self.hparams.categories_path, index_col=0)
-
-        self.patch_classifier = classifier(in_dim=self.hparams.feature_dim,
-                                               hidden_dim=self.hparams.feature_dim,
-                                               out_dim=self.hparams.nclass+1, dropout=0.2)
 
         # 거리 행렬 생성 (C x C)
-
         category_names = list(self.hparams.category_name2id.keys())
+        self.label_distance = pd.read_csv(self.hparams.categories_path, index_col=0)
         distance_matrix = self.label_distance.loc[category_names, category_names].values  # np.ndarray
         self.label_distance_tensor = torch.tensor(distance_matrix, dtype=torch.float32)  # to torch.Tensor
 
-        with open(self.hparams.centroid_path, 'rb') as f:
-            center_embs = pickle.load(f)
-        self.center_embs = torch.tensor(center_embs).to(args.device)
-        self.center_embs = self.center_embs.unsqueeze(0).repeat(self.hparams.batch_size, 1, 1)
-        self.center_embs.requires_grad_(False)
-
-        # self.img_vit_region_encoder.requires_grad_(True)
-        # self.obj_vit_region_encoder .requires_grad_(True)
         self.crossentropy = nn.CrossEntropyLoss()
 
 
@@ -419,12 +371,6 @@ class FathomnetModel(pl.LightningModule):
             intra_env_embs = torch.concat(list(intra_env_embs_dict.values()), 1)
             concat_embs = torch.concat((concat_embs, intra_env_embs), dim=-1)
 
-        if self.hparams.inter_env_attn:
-            pass
-
-        if self.hparams.obj_cnn_feature:
-            pass
-
         embs = self.concat_proj(concat_embs)
 
         sub_h_loss = 0
@@ -433,17 +379,13 @@ class FathomnetModel(pl.LightningModule):
             h_loss_list = self.sub_h_crossentropy_loss(hierarchical_logits_list, target, step_mode)
             h_loss_arr = torch.stack(h_loss_list)
             sub_h_loss = torch.mean(h_loss_arr)
-        p_ce_loss = 0
-        if self.hparams.patch_loss:
-            pass
 
         logits = self.classifier(embs).squeeze()
         ce_loss = self.crossentropy_loss(logits, target, 'class', step_mode)
         h_loss = self.hierarchical_distance(logits, target, step_mode)
         total_loss = (self.hparams.lambda_ce * ce_loss +
-                      self.hparams.lambda_h * h_loss +
-                      self.hparams.lambda_sub_h * sub_h_loss +
-                      self.hparams.lambda_p_ce * p_ce_loss)
+                      self.hparams.lambda_sub_h * sub_h_loss
+                      )
         if not self.hparams.disable_logger:
             self.log(step_mode + "_loss", total_loss.float().mean())
 

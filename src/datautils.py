@@ -60,10 +60,6 @@ class Fathomnet_Dataset(Dataset):
                 transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.2)
             ], p=0.99),
             transforms.RandomRotation(degrees=15, interpolation=InterpolationMode.BILINEAR, expand=False),
-            # transforms.RandomGrayscale(p=0.1),
-            # transforms.GaussianBlur(kernel_size=(1, 5), sigma=(0.01, 5)),
-            # transforms.ToTensor(),
-            # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
 
         self.resize = transforms.Resize((18, 18),
@@ -71,16 +67,6 @@ class Fathomnet_Dataset(Dataset):
                                    antialias=True)
 
         self.args = args
-
-        # if self.phase == 'train' or self.phase == 'valid':
-        #     self.cate_img_dict = {}
-        #     for k in range(len(self.annodata)):
-        #         _dat = self.annodata[k]
-        #         _img_id = _dat['image_id']
-        #         _cate_id = _dat['category_id']
-        #         if _cate_id not in self.cate_img_dict.keys():
-        #             self.cate_img_dict[_cate_id] = []
-        #         self.cate_img_dict[_cate_id].append(_img_id)
 
     def __len__(self):
         return len(self.annodata)
@@ -93,22 +79,18 @@ class Fathomnet_Dataset(Dataset):
 
         if self.phase == 'train' or self.phase == 'valid':
             image_path = os.path.join('./dataset/fathomnet-2025/train_data/images',str(img_id)+'.png')
-            # mask_path = os.path.join('./dataset/fathomnet-2025/train_data/masks',str(img_id)+'.npy')
-            # img_mask = torch.tensor(np.load(mask_path))[None,:,:]
-            # img_mask = self.resize(img_mask)
         else:
             image_path = os.path.join('./dataset/fathomnet-2025/test_data/images',str(img_id)+'.png')
-            # img_mask = 0
 
-        # if self.args.imgxaug:
-        #     env_img_id = random.choice(self.cate_img_dict[category_id])
-        #     env_image_path = os.path.join('./dataset/fathomnet-2025/train_data/images', str(env_img_id) + '.png')
-        #
-        #     image = Image.open(image_path)
-        #     env_image = Image.open(env_image_path)
-        # else:
         image = Image.open(image_path)
-        env_image = image
+        if self.phase == 'train'  and self.args.transform:
+            # if random.random() > 0.9 and self.args.img_downsampling:
+            if self.args.img_downsampling:
+                resize_factor = random.uniform(0.01, 1)
+                img_w, img_h = image.size
+                rescaled_img_w, rescaled_img_h = int(img_w*resize_factor), int(img_h*resize_factor)
+                image_downscaled = image.resize((rescaled_img_w, rescaled_img_h))
+                image = image_downscaled.resize((img_w, img_h))
 
         if image.mode == 'L':
             image = image.convert('RGB')
@@ -156,14 +138,7 @@ class Fathomnet_Dataset(Dataset):
             x2 = min(int(center_x + norm_half_size + 1), img_w)
             obj_img = np.array(image)[y1:y2, x1:x2, :]
 
-
         if self.phase == 'train'  and self.args.transform:
-            # oh, ow, oc = obj_img.shape
-            # if random.random() > 0.9 and (oh > 10 and ow > 10):
-            #     resize_factor = random.uniform(0.1, 0.9)
-            #     new_width = int(obj_img.shape[1] * resize_factor)
-            #     new_height = int(obj_img.shape[0] * resize_factor)
-            #     obj_img = cv2.resize(obj_img, (new_width, new_height), interpolation=cv2.INTER_AREA)
             obj_img = self.colorjitter_aug(Image.fromarray(obj_img))
             for k in env_image_dict:
                 env_image_dict[k] = self.colorjitter_aug(env_image_dict[k])
