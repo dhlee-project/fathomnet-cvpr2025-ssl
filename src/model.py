@@ -45,6 +45,7 @@ class MLP_ProjModel(torch.nn.Module):
             nn.Linear(hidden_dim, out_dim),
             nn.ReLU(),
             nn.LayerNorm(out_dim),
+            nn.Dropout(dropout),
         )
 
     def forward(self, x):
@@ -127,62 +128,6 @@ class MultiLayerAttentionModel(nn.Module):
             q, attn_weights = layer(q, kv, mask)
         return q
 
-
-class BidirectionalAttentionBlock(nn.Module):
-    def __init__(self, dim, num_heads=4, num_blocks=1, dropout=0.2):
-        super().__init__()
-
-        self.self_attn = MultiLayerAttentionModel(
-            query_dim=dim,
-            embed_dim=dim,
-            num_heads=num_heads,
-            num_blocks=num_blocks,
-            dropout=dropout
-        )
-
-        self.mlp = MLP_ProjModel(
-            in_dim=dim,
-            hidden_dim=dim,
-            out_dim=dim,
-            dropout=dropout
-        )
-
-        self.norm1 = nn.LayerNorm(dim)
-        self.norm2 = nn.LayerNorm(dim)
-
-    def forward(self, obj_embeddings, env_embeddings):
-        # 1. Concatenate
-        x = torch.cat([obj_embeddings, env_embeddings], dim=1)  # (B, N1+N2, D)
-
-        # 2. Self-Attention
-        attn_out = self.self_attn(x, x)
-
-        # 3. Residual + Norm
-        x = self.norm1(x + attn_out)
-
-        # 4. Feedforward + Residual + Norm
-        x = self.norm2(x + self.mlp(x))
-
-        # 5. Split back
-        obj_len = obj_embeddings.size(1)
-        obj_out = x[:, :obj_len, :]
-        env_out = x[:, obj_len:, :]
-
-        return obj_out, env_out
-
-class MultiLayerBidirectionalAttention(nn.Module):
-    def __init__(self, num_layers=3, dim=768, num_heads=4, num_blocks=3, dropout=0.2):
-        super().__init__()
-        self.layers = nn.ModuleList([
-            BidirectionalAttentionBlock(dim, num_heads, num_blocks, dropout)
-            for _ in range(num_layers)
-        ])
-
-    def forward(self, obj_embeddings, env_embeddings):
-        for layer in self.layers:
-            obj_embeddings, env_embeddings = layer(obj_embeddings, env_embeddings)
-        return obj_embeddings, env_embeddings
-
 class FathomnetModel(pl.LightningModule):
     def __init__(self, args):
         super().__init__()
@@ -198,7 +143,7 @@ class FathomnetModel(pl.LightningModule):
 
         self.classifier = classifier(in_dim=self.hparams.feature_dim,
                                                hidden_dim=self.hparams.feature_dim,
-                                               out_dim=self.hparams.nclass, dropout=0.4)
+                                               out_dim=self.hparams.nclass, dropout=0.3)
 
         n_concat = 1
         if self.hparams.intra_env_attn:
@@ -212,17 +157,12 @@ class FathomnetModel(pl.LightningModule):
                                                                                embed_dim=self.hparams.feature_dim,
                                                                                num_heads=8,
                                                                                num_blocks=4,
-                                                                               dropout=0.4).cuda()
+                                                                               dropout=0.3).cuda()
+                    self.obj_proj_module[_name] = MLP_ProjModel(in_dim=self.hparams.feature_dim,
+                                                          hidden_dim=self.hparams.feature_dim,
+                                                          out_dim=self.hparams.feature_dim, dropout=0.3)
 
-                    # self.intra_env_attn_module[_name] = MultiLayerBidirectionalAttention(num_layers=3,
-                    #                                  dim=self.hparams.feature_dim,
-                    #                                  num_heads=8,
-                    #                                  num_blocks=4,
-                    #                                  dropout=0.4)
 
-                    # self.obj_proj_module[_name] = MLP_ProjModel(in_dim=self.hparams.feature_dim,
-                    #                                       hidden_dim=self.hparams.feature_dim,
-                    #                                       out_dim=self.hparams.feature_dim, dropout=0.4)
 
         if self.hparams.hierarchical_loss:
             self.hierarchical_target = pd.read_csv(self.hparams.hierarchical_label_path, index_col=0)
@@ -232,11 +172,11 @@ class FathomnetModel(pl.LightningModule):
             self.rank = self.hparams.hierarchical_node_rank
             self.hierarchical_classifier = hierarchical_classifier(in_dim=self.hparams.feature_dim,
                                                  hidden_dim=self.hparams.feature_dim,
-                                                 out_dim_list=self.hparams.hierarchical_node_cnt, dropout=0.4)
+                                                 out_dim_list=self.hparams.hierarchical_node_cnt, dropout=0.3)
 
         self.concat_proj = MLP_ProjModel(in_dim=self.hparams.feature_dim*n_concat,
                                                hidden_dim=self.hparams.feature_dim,
-                                               out_dim=self.hparams.feature_dim, dropout=0.4)
+                                               out_dim=self.hparams.feature_dim, dropout=0.3)
 
 
         # 거리 행렬 생성 (C x C)
@@ -333,29 +273,25 @@ class FathomnetModel(pl.LightningModule):
         obj_vit_enc_out = self.obj_vit_region_encoder(obj_processed_imgs)
         obj_vit_embeddings = obj_vit_enc_out.last_hidden_state[:, :1, :]
 
-        # img_vit_g_embeddings = {}
-        img_vit_p_embeddings = {}
-        for scales in self.hparams.img_encoder_size:
-            for crop_scale in self.hparams.env_img_crop_scale_list:
-                _name = str(scales[0])+'_'+str(crop_scale)
-                img_vit_enc_out = self.img_vit_region_encoders[_name](global_processed_imgs[_name])
-                # img_vit_g_embeddings[_name] = img_vit_enc_out.last_hidden_state[:, :1, :]
-                img_vit_p_embeddings[_name] = img_vit_enc_out.last_hidden_state[:, 1:, :]
-
-        batch_size, _, _ = obj_vit_embeddings.shape
-        concat_embs = obj_vit_embeddings.view(batch_size, -1)
         if self.hparams.intra_env_attn:
-            intra_env_embs_dict = {}
-            intra_obj_embs_dict = {}
+            # img_vit_g_embeddings = {}
+            img_vit_p_embeddings = {}
             for scales in self.hparams.img_encoder_size:
                 for crop_scale in self.hparams.env_img_crop_scale_list:
                     _name = str(scales[0])+'_'+str(crop_scale)
-                    # obj_vit_emb_out = self.obj_proj_module[_name](obj_vit_embeddings)
-                    intra_env_embs_dict[_name] = self.intra_env_attn_module[_name](obj_vit_embeddings, img_vit_p_embeddings[_name]).view(batch_size, -1)
-                    # intra_env_embs_dict[_name] = env_out[:,:1,:].view(batch_size, -1)
-                    # intra_obj_embs_dict[_name] = obj_out[:,:1,:].view(batch_size, -1)
+                    img_vit_enc_out = self.img_vit_region_encoders[_name](global_processed_imgs[_name])
+                    img_vit_p_embeddings[_name] = img_vit_enc_out.last_hidden_state[:, 1:, :]
+
+            batch_size, _, _ = obj_vit_embeddings.shape
+            concat_embs = obj_vit_embeddings.view(batch_size, -1)
+
+            intra_env_embs_dict = {}
+            for scales in self.hparams.img_encoder_size:
+                for crop_scale in self.hparams.env_img_crop_scale_list:
+                    _name = str(scales[0])+'_'+str(crop_scale)
+                    obj_vit_embs = self.obj_proj_module[_name](obj_vit_embeddings)
+                    intra_env_embs_dict[_name] = self.intra_env_attn_module[_name](obj_vit_embs, img_vit_p_embeddings[_name]).view(batch_size, -1)
             intra_env_embs = torch.concat(list(intra_env_embs_dict.values()), 1)
-            # intra_obj_embs = torch.concat(list(intra_obj_embs_dict.values()), 1)
             concat_embs = torch.concat((concat_embs, intra_env_embs), dim=-1)
 
         embs = self.concat_proj(concat_embs)
