@@ -1,4 +1,4 @@
-import glob
+
 import os
 import argparse
 from torch.utils.data import DataLoader
@@ -63,7 +63,7 @@ def load_logger(config):
 
 def get_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default='./config/experiment54.yaml', help='Path to config file')
+    parser.add_argument("--config", type=str, default='./config/experiment51.yaml', help='Path to config file')
     parser.add_argument("--mode", type=str, default=None)
     parser.add_argument("--host", type=str, default=None)
     parser.add_argument("--port", type=str, default=None)
@@ -158,14 +158,15 @@ for current_fold in range(n_fold):
 
             concat_embs = obj_vit_embeddings.view(obj_vit_embeddings.shape[0], -1)
             if Fathomnet_model.hparams.intra_env_attn:
-                intra_env_embs_dcit = {}
+                intra_env_embs_dict = {}
                 for scales in Fathomnet_model.hparams.img_encoder_size:
                     for crop_scale in Fathomnet_model.hparams.env_img_crop_scale_list:
                         _name = str(scales[0]) + '_' + str(crop_scale)
-                        intra_env_embs_dcit[_name] = Fathomnet_model.intra_env_attn_module[_name](obj_vit_embeddings, img_vit_p_embeddings[_name]).view(batch_size, -1)
-                intra_env_embs = torch.concat(list(intra_env_embs_dcit.values()), -1)
+                        obj_vit_emb_out = Fathomnet_model.obj_proj_module[_name](obj_vit_embeddings)
+                        intra_env_embs_dict[_name] = Fathomnet_model.intra_env_attn_module[_name](obj_vit_emb_out,
+                                                                                                  img_vit_p_embeddings[_name]).view(batch_size, -1)
+                intra_env_embs = torch.concat(list(intra_env_embs_dict.values()), 1)
                 concat_embs = torch.concat((concat_embs, intra_env_embs), dim=-1)
-                # concat_embs = Fathomnet_model.combiner(obj_vit_embeddings.view(batch_size, -1), intra_env_embs)
 
             embs = Fathomnet_model.concat_proj(concat_embs)
             logits = Fathomnet_model.classifier(embs).squeeze()
@@ -184,4 +185,6 @@ voted_submission = (
     .agg(lambda x: x.mode().iloc[0])  # 최빈값 (복수일 경우 첫 번째 선택)
     .reset_index()
 )
-voted_submission.to_csv(f"./results/submission_{config.project_name}_0522_01.csv", index=False)
+voted_submission.to_csv(f"./results/submission_{config.project_name}_0525_01.csv", index=False)
+ddd = pd.read_csv(f"./results/submission_{config.project_name}_0522_01.csv")
+sum((voted_submission['concept_name'] == ddd['concept_name']).values)
