@@ -38,12 +38,28 @@ class MLP_ProjModel(torch.nn.Module):
         super().__init__()
 
         self.net = nn.Sequential(
+            nn.LayerNorm(in_dim),
             nn.Linear(in_dim, hidden_dim),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Dropout(dropout),
-            nn.LayerNorm(hidden_dim),
             nn.Linear(hidden_dim, out_dim),
-            nn.ReLU(),
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+class ConcatEmb_ProjModel(torch.nn.Module):
+
+    def __init__(self, in_dim, hidden_dim, out_dim, dropout=0.):
+        super().__init__()
+
+        self.net = nn.Sequential(
+            nn.Linear(in_dim, hidden_dim),
+            nn.GELU(),
+            nn.LayerNorm(hidden_dim),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, out_dim),
+            nn.GELU(),
             nn.LayerNorm(out_dim),
             nn.Dropout(dropout),
         )
@@ -58,7 +74,7 @@ class classifier(torch.nn.Module):
 
         self.net = nn.Sequential(
             nn.Linear(in_dim, hidden_dim),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Dropout(dropout),
             nn.LayerNorm(hidden_dim),
             nn.Linear(hidden_dim, out_dim),
@@ -158,6 +174,7 @@ class FathomnetModel(pl.LightningModule):
                                                                                num_heads=8,
                                                                                num_blocks=4,
                                                                                dropout=0.3).cuda()
+
                     self.obj_proj_module[_name] = MLP_ProjModel(in_dim=self.hparams.feature_dim,
                                                           hidden_dim=self.hparams.feature_dim,
                                                           out_dim=self.hparams.feature_dim, dropout=0.3)
@@ -174,7 +191,7 @@ class FathomnetModel(pl.LightningModule):
                                                  hidden_dim=self.hparams.feature_dim,
                                                  out_dim_list=self.hparams.hierarchical_node_cnt, dropout=0.3)
 
-        self.concat_proj = MLP_ProjModel(in_dim=self.hparams.feature_dim*n_concat,
+        self.concat_proj = ConcatEmb_ProjModel(in_dim=self.hparams.feature_dim*n_concat,
                                                hidden_dim=self.hparams.feature_dim,
                                                out_dim=self.hparams.feature_dim, dropout=0.3)
 
@@ -273,6 +290,9 @@ class FathomnetModel(pl.LightningModule):
         obj_vit_enc_out = self.obj_vit_region_encoder(obj_processed_imgs)
         obj_vit_embeddings = obj_vit_enc_out.last_hidden_state[:, :1, :]
 
+        batch_size, _, _ = obj_vit_embeddings.shape
+        concat_embs = obj_vit_embeddings.view(batch_size, -1)
+
         if self.hparams.intra_env_attn:
             # img_vit_g_embeddings = {}
             img_vit_p_embeddings = {}
@@ -282,14 +302,11 @@ class FathomnetModel(pl.LightningModule):
                     img_vit_enc_out = self.img_vit_region_encoders[_name](global_processed_imgs[_name])
                     img_vit_p_embeddings[_name] = img_vit_enc_out.last_hidden_state[:, 1:, :]
 
-            batch_size, _, _ = obj_vit_embeddings.shape
-            concat_embs = obj_vit_embeddings.view(batch_size, -1)
-
             intra_env_embs_dict = {}
             for scales in self.hparams.img_encoder_size:
                 for crop_scale in self.hparams.env_img_crop_scale_list:
                     _name = str(scales[0])+'_'+str(crop_scale)
-                    obj_vit_embs = self.obj_proj_module[_name](obj_vit_embeddings)
+                    obj_vit_embs = obj_vit_embeddings
                     intra_env_embs_dict[_name] = self.intra_env_attn_module[_name](obj_vit_embs, img_vit_p_embeddings[_name]).view(batch_size, -1)
             intra_env_embs = torch.concat(list(intra_env_embs_dict.values()), 1)
             concat_embs = torch.concat((concat_embs, intra_env_embs), dim=-1)

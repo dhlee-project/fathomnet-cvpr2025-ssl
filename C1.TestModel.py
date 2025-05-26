@@ -63,7 +63,7 @@ def load_logger(config):
 
 def get_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default='./config/experiment51.yaml', help='Path to config file')
+    parser.add_argument("--config", type=str, default='./config/experiment-final11.yaml', help='Path to config file')
     parser.add_argument("--mode", type=str, default=None)
     parser.add_argument("--host", type=str, default=None)
     parser.add_argument("--port", type=str, default=None)
@@ -107,7 +107,7 @@ results = []
 n_fold = config.kfold_nsplits
 for current_fold in range(n_fold):
     model_path = f'~/Project/cvprcom/logs/{config.project_name}/Fold-{current_fold}/last.ckpt'
-    Fathomnet_model = FathomnetModel.load_from_checkpoint(model_path, inter_env_attn=False).to(device)
+    Fathomnet_model = FathomnetModel.load_from_checkpoint(model_path, map_location=torch.device(device)).to(device)
     Fathomnet_model.eval()
 
     config.current_fold = current_fold
@@ -162,7 +162,7 @@ for current_fold in range(n_fold):
                 for scales in Fathomnet_model.hparams.img_encoder_size:
                     for crop_scale in Fathomnet_model.hparams.env_img_crop_scale_list:
                         _name = str(scales[0]) + '_' + str(crop_scale)
-                        obj_vit_emb_out = Fathomnet_model.obj_proj_module[_name](obj_vit_embeddings)
+                        obj_vit_emb_out = obj_vit_embeddings
                         intra_env_embs_dict[_name] = Fathomnet_model.intra_env_attn_module[_name](obj_vit_emb_out,
                                                                                                   img_vit_p_embeddings[_name]).view(batch_size, -1)
                 intra_env_embs = torch.concat(list(intra_env_embs_dict.values()), 1)
@@ -185,6 +185,6 @@ voted_submission = (
     .agg(lambda x: x.mode().iloc[0])  # 최빈값 (복수일 경우 첫 번째 선택)
     .reset_index()
 )
-voted_submission.to_csv(f"./results/submission_{config.project_name}_0525_01.csv", index=False)
-ddd = pd.read_csv(f"./results/submission_{config.project_name}_0522_01.csv")
+voted_submission.to_csv(f"./results/submission_{config.project_name}_0526_final.csv", index=False)
+ddd = pd.read_csv(f"./results/submission_experiment51_0522_01.csv")
 sum((voted_submission['concept_name'] == ddd['concept_name']).values)
