@@ -27,21 +27,16 @@ The script generates the following files:
 | hierarchical_label.csv | Hierarchical labels (Phylum to Species) for each class |
 
 ## Quick Start
-### Checkpoint
-Download the pretrained checkpoint from the [Google Drive link](https://drive.google.com/file/d/14cig7fanfNMsC2WFFBvbeuJMwYnogy8g/view?usp=sharing).
-
-```python
-python C1.TestModel.py --config ./config/experiment-final06.yaml
-```
-
 ## Train
 To train the model from scratch, run the following command:
 ```python
 python B1.BuildModel.py --config ./config/experiment-final06.yaml
 ```
-
+## Checkpoint
+Download the pretrained checkpoint from the [Google Drive link](https://drive.google.com/file/d/14cig7fanfNMsC2WFFBvbeuJMwYnogy8g/view?usp=sharing).
 ## Test
 To evaluate the model or run inference on new data, use:
 ```python
 python C1.TestModel.py --config ./config/experiment-final06.yaml
 ```
+
