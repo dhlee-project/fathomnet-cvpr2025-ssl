@@ -1,0 +1,50 @@
+project_name: 'experiment-final014'
+project_desc: 'vit_intra-wlistt256-diff-attn-concat-60epoch-env_crop-3scale3-5--1-downsampling-true'
+# learning-opt
+device_num : [0]
+device : 'cuda'
+disable_logger: false
+logger_id : null # 'fe88bxkx' # null
+trained_model_name : null #'2024-08-30T13-31-49' # null
+seed_number : 1234
+batch_size : 16 # 4
+num_workers : 16 # 16
+max_epochs : 60
+scheduler_eta_max: 0.000001  # 0.0001
+scheduler_t_up: 5
+scheduler_step_size: 30
+scheduler_gamma: 0.5
+lr: 0.000001
+weight_decay: 0.001
+accumulate_grad_batches: 1
+phase : 'train'
+
+# model
+obj_vit_encoder_path : 'facebook/dinov2-large'
+img_vit_encoder_path : 'facebook/dinov2-large' # 'microsoft/swin-base-patch4-window7-224' #'facebook/dinov2-base'
+feature_dim : 1024
+# data
+root_dir : './datasets/fathomnet-2025/'
+categories_path : './results/dist_categories_debug.csv'
+nclass : 79
+kfold : false
+kfold_nsplits : 1
+obj_encoder_size : [256, 256]
+img_encoder_size : [[256, 256]]
+object_crop : 'square' # 'narrow', 'padding', 'square'
+transform : true
+img_downsampling : true
+env_img_crop : true
+env_img_crop_scale_list : [3, 5, -1]
+# model
+intra_env_attn : true
+hierarchical_loss : true
+
+hierarchical_node_cnt : [7, 19, 40, 64, 73, 78]
+hierarchical_node_rank : ['Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species']
+hierarchical_label_path : './results/hierarchical_label.csv'
+hierachical_labelencoder_path : './results/hierachical_labelencoder.pkl'
+# lambda
+lambda_sub_h : 1.0
+lambda_ce : 1.0
+

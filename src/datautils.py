@@ -85,7 +85,7 @@ class Fathomnet_Dataset(Dataset):
         image = Image.open(image_path)
         if self.phase == 'train'  and self.args.transform:
             if self.args.img_downsampling:
-                resize_factor = random.uniform(0.1, 1)
+                resize_factor = random.uniform(0.01, 1)
                 img_w, img_h = image.size
                 rescaled_img_w, rescaled_img_h = int(img_w*resize_factor), int(img_h*resize_factor)
                 image_downscaled = image.resize((rescaled_img_w, rescaled_img_h))
