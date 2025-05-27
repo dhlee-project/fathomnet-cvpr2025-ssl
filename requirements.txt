@@ -1,0 +1,9 @@
+omegaconf==2.3.0
+pytorch-lightning==2.5.1.post0
+transformers==4.52.3
+matplotlib==3.10.3
+opencv-python==4.11.0.86
+pandas==2.2.3
+nibabel==5.3.2
+scikit-learn==1.6.1
+wandb==0.19.11
