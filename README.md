@@ -39,4 +39,7 @@ To evaluate the model or run inference on new data, use:
 ```python
 python C1.TestModel.py --config ./config/experiment-final06.yaml
 ```
+## Contact
+If you have any questions, suggestions, or issues related to this project, feel free to reach out to me at:
 
+rmsgml8689@gmail.com
