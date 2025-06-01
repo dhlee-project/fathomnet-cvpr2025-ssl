@@ -151,11 +151,12 @@ class FathomnetModel(pl.LightningModule):
 
         # assert self.hparams.temperature > 0.0, "The temperature must be a positive float!"
         self.img_vit_region_encoders = nn.ModuleDict()
+        modelaa = AutoModel.from_pretrained(self.hparams.img_vit_encoder_path)
         for scales in self.hparams.img_encoder_size:
             for crop_scale in self.hparams.env_img_crop_scale_list:
-                self.img_vit_region_encoders[str(scales[0])+'_'+str(crop_scale)] = AutoModel.from_pretrained(self.hparams.img_vit_encoder_path)
+                self.img_vit_region_encoders[str(scales[0])+'_'+str(crop_scale)] = modelaa
 
-        self.obj_vit_region_encoder  = AutoModel.from_pretrained(self.hparams.obj_vit_encoder_path)
+        self.obj_vit_region_encoder  = modelaa # AutoModel.from_pretrained(self.hparams.obj_vit_encoder_path)
 
         self.classifier = classifier(in_dim=self.hparams.feature_dim,
                                                hidden_dim=self.hparams.feature_dim,
