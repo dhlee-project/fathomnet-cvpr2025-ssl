@@ -8,6 +8,11 @@ The proposed model is a visual recognition model designed to classify marine ani
 These embeddings are then processed by the Multi-Context Environmental Attention Module (MCEAM), which infers attention-based interactions between the object and its surrounding environment at the context level. The resulting interactions are integrated to form a unified representation that captures both object-specific features and object-environment relationships. This integrated embedding is passed to a classifier to predict the marine animal's label.
 To enhance semantic consistency in the model’s predictions, a Hierarchical Auxiliary Classification module is introduced during training. This auxiliary module performs classification across biological taxonomy levels (e.g., order, family, species), supporting the main classification task with a biologically informed hierarchical structure.
 
+
+## Note
+#### 2025.06.04
+We deprecated experiment-final06.yaml and replaced it with our best-performing model configuration, experiment-final14.yaml.
+
 ## Installation
 (1) PyTorch. See https://pytorch.org/ for instruction. For example,
 ```
@@ -35,17 +40,16 @@ The script generates the following files:
 ## Train
 To train the model from scratch, run the following command:
 ```python
-python B1.BuildModel.py --config ./config/experiment-final06.yaml
+python B1.BuildModel.py --config ./config/experiment-final14.yaml
 ```
 ## Checkpoint
-Download the pretrained checkpoint from the [Google Drive link](https://drive.google.com/file/d/14cig7fanfNMsC2WFFBvbeuJMwYnogy8g/view?usp=sharing).
+Download the pretrained checkpoint from the [Google Drive link](https://drive.google.com/drive/u/1/folders/1JF5B51CRUr-J_S2GoC-i5D-UmYCXClDk).
 ## Test
 To evaluate the model or run inference on new data, use:
 ```python
-python C1.TestModel.py --config ./config/experiment-final06.yaml
+python C1.TestModel.py --config ./config/experiment-final14.yaml
 ```
 ## Contact
 If you have any questions, suggestions, or issues related to this project, feel free to reach out to me at:
 
 dhlee.ie@yonsei.ac.kr
-rmsgml8689@gmail.com   
