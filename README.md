@@ -48,5 +48,5 @@ python C1.TestModel.py --config ./config/experiment-final06.yaml
 ## Contact
 If you have any questions, suggestions, or issues related to this project, feel free to reach out to me at:
 
-rmsgml8689@gmail.com
+rmsgml8689@gmail.com   
 dhlee.ie@yonsei.ac.kr
