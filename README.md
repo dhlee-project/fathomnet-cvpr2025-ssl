@@ -8,7 +8,6 @@ The proposed model is a visual recognition model designed to classify marine ani
 These embeddings are then processed by the Multi-Context Environmental Attention Module (MCEAM), which infers attention-based interactions between the object and its surrounding environment at the context level. The resulting interactions are integrated to form a unified representation that captures both object-specific features and object-environment relationships. This integrated embedding is passed to a classifier to predict the marine animal's label.
 To enhance semantic consistency in the model’s predictions, a Hierarchical Auxiliary Classification module is introduced during training. This auxiliary module performs classification across biological taxonomy levels (e.g., order, family, species), supporting the main classification task with a biologically informed hierarchical structure.
 
-
 ## Installation
 (1) PyTorch. See https://pytorch.org/ for instruction. For example,
 ```
@@ -48,5 +47,5 @@ python C1.TestModel.py --config ./config/experiment-final06.yaml
 ## Contact
 If you have any questions, suggestions, or issues related to this project, feel free to reach out to me at:
 
-rmsgml8689@gmail.com   
 dhlee.ie@yonsei.ac.kr
+rmsgml8689@gmail.com   
