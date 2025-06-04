@@ -551,3 +551,4 @@ datasets
 lightning_logs
 results
 *.pkl
+!/figure/Figure1.jpg

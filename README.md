@@ -2,6 +2,12 @@
 This repository provides the solution(code and checkpoint) of the CVPR'2025 FathomNet-FGVC challenge.
 [[FathomNet 2025 @ CVPR-FGVC]](https://www.kaggle.com/competitions/fathomnet-2025/overview)
 
+## Our Model 
+![Figure1.jpg](figure/Figure1.jpg)
+The proposed model is a visual recognition model designed to classify marine animals by considering not only the target object itself but also its surrounding habitat. As illustrated, the model takes as input both the region-of-interest (ROI) image of the marine animal extracted from the original image and additional context region images defined as 3×, 5×, and full-image scales centered on the ROI. Each input image is transformed into an embedding using a Vision Transformer (ViT). The marine animal ROI is represented by a global embedding derived from the [CLS] token, while the context region images are represented by patch embeddings.
+These embeddings are then processed by the Multi-Context Environmental Attention Module (MCEAM), which infers attention-based interactions between the object and its surrounding environment at the context level. The resulting interactions are integrated to form a unified representation that captures both object-specific features and object-environment relationships. This integrated embedding is passed to a classifier to predict the marine animal's label.
+To enhance semantic consistency in the model’s predictions, a Hierarchical Auxiliary Classification module is introduced during training. This auxiliary module performs classification across biological taxonomy levels (e.g., order, family, species), supporting the main classification task with a biologically informed hierarchical structure.
+
 
 ## Installation
 (1) PyTorch. See https://pytorch.org/ for instruction. For example,
