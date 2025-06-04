@@ -43,7 +43,8 @@ To train the model from scratch, run the following command:
 python B1.BuildModel.py --config ./config/experiment-final14.yaml
 ```
 ## Checkpoint
-Download the pretrained checkpoint from the [Google Drive link](https://drive.google.com/drive/u/1/folders/1JF5B51CRUr-J_S2GoC-i5D-UmYCXClDk).
+Download the pretrained checkpoint of the winning model from the competition using the Google Drive link below.   
+[Model_link](https://drive.google.com/drive/u/1/folders/1JF5B51CRUr-J_S2GoC-i5D-UmYCXClDk).
 ## Test
 To evaluate the model or run inference on new data, use:
 ```python
