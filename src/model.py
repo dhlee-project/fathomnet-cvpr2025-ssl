@@ -130,6 +130,20 @@ class AttentionLayer(nn.Module):
         return x, attn_weights
 
 
+# class MultiLayerAttentionModel(nn.Module):
+#     def __init__(self, query_dim, embed_dim, num_heads=4, num_blocks=3, dropout=0.0):
+#         super(MultiLayerAttentionModel, self).__init__()
+#
+#         self.layers = nn.ModuleList([
+#             AttentionLayer(query_dim if i == 0 else embed_dim, embed_dim, num_heads, dropout)
+#             for i in range(num_blocks)
+#         ])
+#
+#     def forward(self, q, kv, mask=None):
+#         for layer in self.layers:
+#             q, attn_weights = layer(q, kv, mask)
+#         return q
+
 class MultiLayerAttentionModel(nn.Module):
     def __init__(self, query_dim, embed_dim, num_heads=4, num_blocks=3, dropout=0.0):
         super(MultiLayerAttentionModel, self).__init__()
@@ -139,9 +153,13 @@ class MultiLayerAttentionModel(nn.Module):
             for i in range(num_blocks)
         ])
 
-    def forward(self, q, kv, mask=None):
+    def forward(self, q, kv, mask=None, return_attn=False):
+        last_atten_weights = None
         for layer in self.layers:
             q, attn_weights = layer(q, kv, mask)
+            last_atten_weights = attn_weights
+        if return_attn:
+            return q, last_atten_weights
         return q
 
 class FathomnetModel(pl.LightningModule):
@@ -183,6 +201,14 @@ class FathomnetModel(pl.LightningModule):
 
         if self.hparams.hierarchical_loss:
             self.hierarchical_target = pd.read_csv(self.hparams.hierarchical_label_path, index_col=0)
+
+            if self.hparams.random_hierarchical_loss:
+                len_h = len(self.hierarchical_target)
+                for i in range(self.hparams.random_hierarchical_rank):
+                    coln = self.hierarchical_target.columns[i]
+                    r_class = np.random.choice(self.hierarchical_target[coln].unique(), len_h)
+                    self.hierarchical_target[coln] = r_class
+
             with open(self.hparams.hierachical_labelencoder_path, 'rb') as f:
                 self.hierachical_labelencoder = pickle.load(f)
 
@@ -195,13 +221,11 @@ class FathomnetModel(pl.LightningModule):
                                                hidden_dim=self.hparams.feature_dim,
                                                out_dim=self.hparams.feature_dim, dropout=0.3)
 
-
         # 거리 행렬 생성 (C x C)
         category_names = list(self.hparams.category_name2id.keys())
         self.label_distance = pd.read_csv(self.hparams.categories_path, index_col=0)
         distance_matrix = self.label_distance.loc[category_names, category_names].values  # np.ndarray
         self.label_distance_tensor = torch.tensor(distance_matrix, dtype=torch.float32)  # to torch.Tensor
-
         self.crossentropy = nn.CrossEntropyLoss()
 
 
@@ -258,6 +282,25 @@ class FathomnetModel(pl.LightningModule):
                     acc = (correct / total)
                 self.log(f"{mode}_{level}_acc", acc)
         return loss_list
+
+    def sub_h_random_crossentropy_loss(self, hierarchical_logits_list, target, mode):
+        h_target = self.hierarchical_target.loc[target.cpu().numpy(), :]
+        loss_list = []
+        for i in range(len(self.rank)):
+            level = self.rank[i]
+            _level_logit = hierarchical_logits_list[i].squeeze()
+            _level_target = torch.tensor(h_target.loc[:, level].values).to(_level_logit.device)
+            _loss = self.crossentropy(_level_logit, _level_target)
+            loss_list.append(_loss)
+            if not self.hparams.disable_logger:
+                with torch.no_grad():
+                    preds = torch.argmax(_level_logit, dim=1)
+                    correct = (preds == _level_target).sum().item()
+                    total = _level_target.size(0)
+                    acc = (correct / total)
+                self.log(f"{mode}_{level}_acc", acc)
+        return loss_list
+
 
     def hierarchical_distance(self, logits, target, mode):
         # 확률화
@@ -316,7 +359,7 @@ class FathomnetModel(pl.LightningModule):
         sub_h_loss = 0
         if self.hparams.hierarchical_loss:
             hierarchical_logits_list = self.hierarchical_classifier(embs)
-            h_loss_list = self.sub_h_crossentropy_loss(hierarchical_logits_list, target, step_mode)
+            h_loss_list = self.sub_h_random_crossentropy_loss(hierarchical_logits_list, target, step_mode)
             h_loss_arr = torch.stack(h_loss_list)
             sub_h_loss = torch.mean(h_loss_arr)
 
