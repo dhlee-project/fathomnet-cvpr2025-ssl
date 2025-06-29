@@ -204,7 +204,8 @@ class FathomnetModel(pl.LightningModule):
 
             if self.hparams.random_hierarchical_loss:
                 len_h = len(self.hierarchical_target)
-                for i in range(self.hparams.random_hierarchical_rank):
+                len_hc = len(self.hierarchical_target.columns)
+                for i in range(len_hc):
                     coln = self.hierarchical_target.columns[i]
                     r_class = np.random.choice(self.hierarchical_target[coln].unique(), len_h)
                     self.hierarchical_target[coln] = r_class

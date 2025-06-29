@@ -74,7 +74,7 @@ config = OmegaConf.load(args.config)
 pl.seed_everything(config.seed_number)
 init_random_seed(config.seed_number)
 
-train_anno_path = './dataset/fathomnet-2025/dataset_train.json'
+train_anno_path = os.path.join(config.root_dir, 'dataset_train.json')
 with open(train_anno_path, 'r', encoding='utf-8') as f:
     dataset = json.load(f)
 anno_data = dataset['annotations']
@@ -97,16 +97,6 @@ for i in range(len_anno):
     anno_data[i]['category_id']  = cate_id
 
 if config.kfold:
-    # groups = [ann['image_id'] for ann in anno_data]  # 각 annotation에 대한 image_id
-    # np.random.seed(777)
-    # np.random.shuffle(groups)
-    # kf = GroupKFold(n_splits=config.kfold_nsplits)
-    # fold_indices = []
-    # for fold, (train_idx, val_idx) in enumerate(kf.split(anno_data, groups=groups)):
-    #     fold_indices.append({
-    #         'train': train_idx.tolist(),
-    #         'val': val_idx.tolist()
-    #     })
     data_len = len(anno_data)
     kf = KFold(n_splits=config.kfold_nsplits, shuffle=True, random_state=777)  # 재현성을 위한 random_state
     fold_indices = []

@@ -78,9 +78,9 @@ class Fathomnet_Dataset(Dataset):
         bbox = anno['bbox']
 
         if self.phase == 'train' or self.phase == 'valid':
-            image_path = os.path.join('./dataset/fathomnet-2025/train_data/images',str(img_id)+'.png')
+            image_path = os.path.join(self.args.root_dir, 'train_data/images',str(img_id)+'.png')
         else:
-            image_path = os.path.join('./dataset/fathomnet-2025/test_data/images',str(img_id)+'.png')
+            image_path = os.path.join(self.args.root_dir, 'test_data/images',str(img_id)+'.png')
 
         image = Image.open(image_path)
         if self.phase == 'train'  and self.args.transform:
