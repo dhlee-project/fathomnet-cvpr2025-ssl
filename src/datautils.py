@@ -76,11 +76,15 @@ class Fathomnet_Dataset(Dataset):
         img_id = anno['image_id']
         category_id = anno['category_id']
         bbox = anno['bbox']
+        if 'FAIR1M' in self.args.root_dir:
+            ext = '.jpg'
+        else:
+            ext = '.png'
 
         if self.phase == 'train' or self.phase == 'valid':
-            image_path = os.path.join(self.args.root_dir, 'train_data/images',str(img_id)+'.png')
+            image_path = os.path.join(self.args.root_dir, 'train_data/images',str(img_id)+ext)
         else:
-            image_path = os.path.join(self.args.root_dir, 'test_data/images',str(img_id)+'.png')
+            image_path = os.path.join(self.args.root_dir, 'test_data/images',str(img_id)+ext)
 
         image = Image.open(image_path)
         if self.phase == 'train'  and self.args.transform:
@@ -93,6 +97,7 @@ class Fathomnet_Dataset(Dataset):
 
         if image.mode == 'L':
             image = image.convert('RGB')
+
         img_w, img_h = image.size
         init_x, init_y, w, h = bbox
         center_x = int(init_x + w // 2)
@@ -136,14 +141,15 @@ class Fathomnet_Dataset(Dataset):
             x1 = max(int(center_x - norm_half_size - 1), 0)
             x2 = min(int(center_x + norm_half_size + 1), img_w)
             obj_img = np.array(image)[y1:y2, x1:x2, :]
-
-        if self.phase == 'train'  and self.args.transform:
-            obj_img = self.colorjitter_aug(Image.fromarray(obj_img))
-            for k in env_image_dict:
-                env_image_dict[k] = self.colorjitter_aug(env_image_dict[k])
-        else:
-            obj_img = Image.fromarray(obj_img)
-
+        try:
+            if self.phase == 'train'  and self.args.transform:
+                obj_img = self.colorjitter_aug(Image.fromarray(obj_img))
+                for k in env_image_dict:
+                    env_image_dict[k] = self.colorjitter_aug(env_image_dict[k])
+            else:
+                obj_img = Image.fromarray(obj_img)
+        except:
+            pass
         obj_processed_img = (self.obj_enc_processor(images=obj_img.resize(self.args.obj_encoder_size),return_tensors="pt").pixel_values).squeeze(dim=0)  ###224
 
         img_processed = {}

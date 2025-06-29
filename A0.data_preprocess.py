@@ -8,8 +8,11 @@ import pickle
 import argparse
 
 parser = argparse.ArgumentParser(description="FathomNet 2025 preprocessing")
-parser.add_argument('--data_path', type=str, default='../../dataset/fathomnet-2025/dataset_train.json',
+parser.add_argument('--data_path', type=str, default='./dataset/fathomnet-2025/dataset_train.json',
                     help='Path to dataset_train.json')
+parser.add_argument("--mode", type=str, default=None)
+parser.add_argument("--host", type=str, default=None)
+parser.add_argument("--port", type=str, default=None)
 args = parser.parse_args()
 data_path = args.data_path
 
@@ -83,6 +86,7 @@ def recursive_child_snatcher(anc):
 
 with open(data_path, 'r') as f:
     data = json.load(f)
+
 classes = [x['name'] for x in data['categories']]
 
 accepted_ranks = np.array(['Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species'])
@@ -149,8 +153,8 @@ for col in df.columns:
     encoded_columns.append(df2[col])
     id2name[col] = {_id: _name for _id, _name in zip(le.fit_transform(df[col]), df[col])}
     name2id[col] = {_name: _id for _id, _name in zip(le.fit_transform(df[col]), df[col])}
-
 df_encoded = pd.concat(encoded_columns, axis=1)
+
 hierachical_labelencoder = {'id2name' : id2name, 'name2id' : name2id}
 with open('./results/hierachical_labelencoder.pkl', 'wb') as f:
     pickle.dump(hierachical_labelencoder, f)
