@@ -1,7 +1,7 @@
 # Solution to the CVPR'2025 FGVC Challenge
 This repository provides the solution(code and checkpoint) of the CVPR'2025 FathomNet-FGVC challenge.
 [[FathomNet 2025 @ CVPR-FGVC]](https://www.kaggle.com/competitions/fathomnet-2025/overview). 
-The research was conducted at the [[Smart Systems Laboratory]](http://smartweb.yonsei.ac.kr/) led by Professor Wooju Kim at Yonsei University 
+
 ## Our Model 
 ![Figure1.jpg](figure/Figure1.jpg)
 The proposed model is a visual recognition model designed to classify marine animals by considering not only the target object itself but also its surrounding habitat. As illustrated, the model takes as input both the region-of-interest (ROI) image of the marine animal extracted from the original image and additional context region images defined as 3×, 5×, and full-image scales centered on the ROI. Each input image is transformed into an embedding using a Vision Transformer (ViT). The marine animal ROI is represented by a global embedding derived from the [CLS] token, while the context region images are represented by patch embeddings.
@@ -50,8 +50,3 @@ To evaluate the model or run inference on new data, use:
 ```python
 python C1.TestModel.py --config ./config/experiment-final14.yaml
 ```
-## Contact
-If you have any questions, suggestions, or issues related to this project, feel free to reach out to me at:
-
-dhlee.ie@yonsei.ac.kr   
-This README was written by Geunhee Kim.
