@@ -40,17 +40,24 @@ class Fathomnet_Dataset(Dataset):
         self.annodata = annodata
         self.phase = phase
 
-        self.obj_enc_processor = AutoImageProcessor.from_pretrained(args.obj_vit_encoder_path)  # 앞으로 빼기
-        self.obj_enc_processor.size['shortest_edge'] = args.obj_encoder_size[0]
-        self.obj_enc_processor.do_center_crop = False
+        if 'swin' in args.obj_vit_encoder_path:
+            self.obj_enc_processor = AutoImageProcessor.from_pretrained(args.obj_vit_encoder_path)  # 앞으로 빼기
+        else:
+            self.obj_enc_processor = AutoImageProcessor.from_pretrained(args.obj_vit_encoder_path)  # 앞으로 빼기
+            self.obj_enc_processor.size['shortest_edge'] = args.obj_encoder_size[0]
+            self.obj_enc_processor.do_center_crop = False
 
         self.img_enc_processor = {}
         for scales in args.img_encoder_size:
             for crop_scale in args.env_img_crop_scale_list:
-                _name = str(scales[0])+'_'+str(crop_scale)
-                self.img_enc_processor[_name] = AutoImageProcessor.from_pretrained(args.img_vit_encoder_path)  # 앞으로 빼기
-                self.img_enc_processor[_name].size['shortest_edge'] = scales[0]
-                self.img_enc_processor[_name].do_center_crop = False
+                if 'swin' in args.obj_vit_encoder_path:
+                    _name = str(scales[0])+'_'+str(crop_scale)
+                    self.img_enc_processor[_name] = AutoImageProcessor.from_pretrained(args.img_vit_encoder_path)  # 앞으로 빼기
+                else:
+                    _name = str(scales[0])+'_'+str(crop_scale)
+                    self.img_enc_processor[_name] = AutoImageProcessor.from_pretrained(args.img_vit_encoder_path)  # 앞으로 빼기
+                    self.img_enc_processor[_name].size['shortest_edge'] = scales[0]
+                    self.img_enc_processor[_name].do_center_crop = False
 
         self.colorjitter_aug = transforms.Compose([
             # transforms.RandomResizedCrop(size=args.img_encoder_size, scale=(0.9, 1.0), ratio=(0.9, 1.1)),
@@ -83,11 +90,13 @@ class Fathomnet_Dataset(Dataset):
 
         if self.phase == 'train' or self.phase == 'valid':
             image_path = os.path.join(self.args.root_dir, 'train_data/images',str(img_id)+ext)
+        elif 'FAIR1M' in self.args.root_dir and self.phase == 'test':
+            image_path = os.path.join(self.args.root_dir, 'valid_data/images', str(img_id) + ext)
         else:
             image_path = os.path.join(self.args.root_dir, 'test_data/images',str(img_id)+ext)
 
         image = Image.open(image_path)
-        if self.phase == 'train'  and self.args.transform:
+        if self.phase == 'train' and self.args.transform:
             if self.args.img_downsampling:
                 resize_factor = random.uniform(0.01, 1)
                 img_w, img_h = image.size
@@ -114,7 +123,6 @@ class Fathomnet_Dataset(Dataset):
             x1 = int(max(center_x - crop_size, 0))
             x2 = int(min(center_x + crop_size, img_w))
             w_img = np.array(image)[y1:y2, x1:x2, :]
-            # w_img = pad_to_square(w_img, pad_value=0)
             env_image_dict[crop_scale] = Image.fromarray(w_img)
 
         if self.phase == 'train' and self.args.transform:
@@ -141,15 +149,14 @@ class Fathomnet_Dataset(Dataset):
             x1 = max(int(center_x - norm_half_size - 1), 0)
             x2 = min(int(center_x + norm_half_size + 1), img_w)
             obj_img = np.array(image)[y1:y2, x1:x2, :]
-        try:
-            if self.phase == 'train'  and self.args.transform:
-                obj_img = self.colorjitter_aug(Image.fromarray(obj_img))
-                for k in env_image_dict:
-                    env_image_dict[k] = self.colorjitter_aug(env_image_dict[k])
-            else:
-                obj_img = Image.fromarray(obj_img)
-        except:
-            pass
+
+        if self.phase == 'train'  and self.args.transform:
+            obj_img = self.colorjitter_aug(Image.fromarray(obj_img))
+            for k in env_image_dict:
+                env_image_dict[k] = self.colorjitter_aug(env_image_dict[k])
+        else:
+            obj_img = Image.fromarray(obj_img)
+
         obj_processed_img = (self.obj_enc_processor(images=obj_img.resize(self.args.obj_encoder_size),return_tensors="pt").pixel_values).squeeze(dim=0)  ###224
 
         img_processed = {}
@@ -169,9 +176,7 @@ class Fathomnet_Dataset(Dataset):
 
         res_dat = {
             "obj_processed_img": obj_processed_img,
-            # "obj_mask" : img_mask,
             "target" : target,
             "obj_anno": anno}
         res_dat.update(img_processed)
-
         return res_dat

@@ -8,7 +8,7 @@ import pickle
 import argparse
 
 parser = argparse.ArgumentParser(description="FathomNet 2025 preprocessing")
-parser.add_argument('--data_path', type=str, default='./dataset/fathomnet-2025/dataset_train.json',
+parser.add_argument('--data_path', type=str, default='./datasets/fathomnet-2025/dataset_train.json',
                     help='Path to dataset_train.json')
 parser.add_argument("--mode", type=str, default=None)
 parser.add_argument("--host", type=str, default=None)
@@ -88,9 +88,7 @@ with open(data_path, 'r') as f:
     data = json.load(f)
 
 classes = [x['name'] for x in data['categories']]
-
 accepted_ranks = np.array(['Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species'])
-
 tree_dict = {}
 tree_rank_dict = {}
 for label in tqdm(classes, desc="Getting taxonomy paths"):

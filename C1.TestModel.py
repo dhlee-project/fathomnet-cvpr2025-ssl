@@ -63,7 +63,7 @@ def load_logger(config):
 
 def get_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default='./config/experiment-final14.yaml', help='Path to config file')
+    parser.add_argument("--config", type=str, default='./config/experiment-final31.yaml', help='Path to config file')
     parser.add_argument("--mode", type=str, default=None)
     parser.add_argument("--host", type=str, default=None)
     parser.add_argument("--port", type=str, default=None)
@@ -79,7 +79,7 @@ config.imgxaug = False
 config.kfold_nsplits = 1
 batchsize = 2
 device = 'cuda'
-test_anno_path = './dataset/fathomnet-2025/dataset_test.json'
+test_anno_path = './datasets/fathomnet-2025/dataset_test.json'
 with open(test_anno_path, 'r', encoding='utf-8') as f:
     dataset = json.load(f)
 anno_data = dataset['annotations']
